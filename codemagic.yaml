@@ -1,0 +1,59 @@
+# Codemagic: сборка ModemMon iOS без Mac.
+#
+# В репозитории проект лежит во вложенной папке ModemMon-iOS/ — пути ниже учитывают это.
+#
+# ios-unsigned — соберёт ModemMon-unsigned.zip (Payload-формат, ставится через AltStore/SideStore).
+# ios-signed   — подписанная .ipa: в Codemagic подключи Apple Developer Portal (Teams →
+#                Connected accounts → Apple Developer Portal), потом запусти этот workflow.
+#
+# Артефакты появятся во вкладке Artifacts после сборки.
+
+workflows:
+  ios-unsigned:
+    name: ModemMon iOS (unsigned)
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build (no codesign)
+        script: |
+          set -e
+          cd $CM_BUILD_DIR/ModemMon-iOS
+          xcodebuild -project ModemMon.xcodeproj \
+            -target ModemMon \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build
+      - name: Package zip
+        script: |
+          set -e
+          cd $CM_BUILD_DIR/ModemMon-iOS/build/Build/Products/Release-iphoneos
+          zip -qry "$CM_BUILD_DIR/ModemMon-unsigned.zip" ModemMon.app
+    publishing:
+      artifacts:
+        - ModemMon-unsigned.zip
+
+  ios-signed:
+    name: ModemMon iOS (signed, development)
+    max_build_duration: 30
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: ru.franh.modemmon
+    scripts:
+      - name: Fetch signing files
+        script: xcode-project use-profiles
+      - name: Build and sign ipa
+        script: |
+          set -e
+          cd $CM_BUILD_DIR/ModemMon-iOS
+          xcode-project build-ipa \
+            --project ModemMon.xcodeproj \
+            --config Release
+    publishing:
+      artifacts:
+        - ModemMon-iOS/build/ios/ipa/*.ipa
