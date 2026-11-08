@@ -164,16 +164,19 @@ final class AppState: ObservableObject {
             }
             return
         }
-        guard var svc = service else { return }
+        guard let svc = service else { return }
         do {
-            async let m = svc.modemStatus()
+            // Системные метрики — обязательны (это живой ubus-канал)
             async let s = svc.quickSys()
             async let dev = svc.netDev()
-            let (mres, sres, devs) = try await (m, s, dev)
-            modem = mres
+            let (sres, devs) = try await (s, dev)
             sys = sres
             updateRates(devs)
             failCount = 0
+            // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере
+            if let mres = try? await svc.modemStatus() {
+                modem = mres
+            }
             appendTrend()
             if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
                 await checkUplink()
