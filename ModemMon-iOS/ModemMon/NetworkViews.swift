@@ -196,7 +196,7 @@ struct IfaceEditView: View {
                     }
                 }
             }
-            Section("Metric (failover-порядок)") {
+            Section {
                 TextField("metric", text: $metricDraft)
                     .keyboardType(.numberPad)
                 Button {
@@ -205,6 +205,8 @@ struct IfaceEditView: View {
                     HStack { Spacer(); Text("Сохранить metric"); Spacer() }
                 }
                 .disabled(busy || Int(metricDraft) == nil)
+            } header: {
+                Text("Metric (failover-порядок)")
             } footer: {
                 Text("Чем меньше metric, тем приоритетнее интерфейс. У wwan обычно 10, у резервного канала выше.")
             }

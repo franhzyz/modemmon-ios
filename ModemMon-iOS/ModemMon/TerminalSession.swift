@@ -16,7 +16,7 @@ final class TerminalSession: ObservableObject {
     func bind(_ a: AppState) { app = a }
 
     func checkInstalled() async {
-        guard let app, var svc = app.service else { return }
+        guard let app, let svc = app.service else { return }
         if app.conn == .demo {
             installed = true
             return
@@ -26,7 +26,7 @@ final class TerminalSession: ObservableObject {
     }
 
     func install() async {
-        guard let app, var svc = app.service, app.conn != .demo else { return }
+        guard let app, let svc = app.service, app.conn != .demo else { return }
         do {
             try await Install.installMmterm(svc.ubus)
             installed = true
@@ -39,7 +39,7 @@ final class TerminalSession: ObservableObject {
 
     /// Выполнить команду: ставит её в очередь на роутере и поллит вывод.
     func run(_ command: String) async {
-        guard let app, var svc = app.service else { return }
+        guard let app, let svc = app.service else { return }
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard busy == false else { return }
 
@@ -74,7 +74,7 @@ final class TerminalSession: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             attempt += 1
             if attempt > 600 { break } // ~5 минут максимум
-            guard var svc = app.service else { break }
+            guard let svc = app.service else { break }
             guard let out = try? await svc.ubus.fileExec("/usr/bin/mmterm poll") else { continue }
             await consume(out.stdout)
             if out.stdout.contains("__MMTERM done") {
@@ -111,7 +111,7 @@ final class TerminalSession: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         busy = false
-        guard let app, var svc = app.service, app.conn != .demo else { return }
+        guard let app, let svc = app.service, app.conn != .demo else { return }
         _ = try? await svc.ubus.fileExec("/usr/bin/mmterm stop")
         lines.append(TermLine(text: "— прервано —", isCmd: false))
     }

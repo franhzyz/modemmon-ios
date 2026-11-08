@@ -305,7 +305,8 @@ struct BackupView: View {
                 }
                 .disabled(busy)
             }
-            Section("Бэкапы в /tmp") {
+            Section {
+                // Бэкапы в /tmp
                 if backups.isEmpty { Text("Пока нет").foregroundStyle(.secondary) }
                 ForEach(backups) { b in
                     HStack {
@@ -323,6 +324,8 @@ struct BackupView: View {
                             .buttonStyle(.borderless)
                     }
                 }
+            } header: {
+                Text("Бэкапы в /tmp")
             } footer: {
                 Text("Бэкап лежит в /tmp — после перезагрузки роутера исчезает. Скачайте важное через «Файлы».")
             }
@@ -340,7 +343,7 @@ struct BackupView: View {
     private func create() async {
         busy = true
         defer { busy = false }
-        await app.run { svc in try await svc.createBackup() }
+        _ = await app.run { svc in try await svc.createBackup() }
         await load()
     }
 }

@@ -502,7 +502,7 @@ struct LinksView: View {
 
     var body: some View {
         List {
-            Section("Открыть в Safari") {
+            Section {
                 if let p = app.activeProfile {
                     Link(destination: URL(string: "\(p.scheme)://\(p.host)\(p.port == 80 || p.port == 443 ? "" : ":\(p.port)")/cgi-bin/luci/admin")!) {
                         Label("LuCI — веб-интерфейс роутера", systemImage: "safari")
@@ -511,6 +511,8 @@ struct LinksView: View {
                         Label("Телеметрия модема", systemImage: "chart.line.uptrend.xyaxis")
                     }
                 }
+            } header: {
+                Text("Открыть в Safari")
             } footer: {
                 Text("Эти страницы откроются в Safari. Если роутер доступен только по IP в локальной сети — iPhone должен быть в той же сети.")
             }
@@ -561,8 +563,10 @@ struct SettingsView: View {
                     Text("10 с").tag(10.0)
                 }
             }
-            Section("Безопасность") {
+            Section {
                 Toggle("Безопасный режим", isOn: $app.settings.safeMode)
+            } header: {
+                Text("Безопасность")
             } footer: {
                 Text("Блокирует опасные shell-команды (reboot, sysupgrade, rm -rf / и т.п.), если они встречаются в редактируемых полях.")
             }
