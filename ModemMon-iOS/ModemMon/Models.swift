@@ -66,12 +66,29 @@ struct J {
 
     func sub(_ keys: String...) -> J? {
         if keys.isEmpty { return self }
-        if let x = value(keys...) as? [String: Any] { return J(x) }
+        if let x = valueArr(keys) as? [String: Any] { return J(x) }
         return nil
     }
 
-    func num(_ keys: String...) -> Double? {
-        guard let x = value(keys...) else { return nil }
+    func num(_ keys: String...) -> Double? { numArr(keys) }
+
+    func int(_ keys: String...) -> Int? {
+        guard let d = numArr(keys) else { return nil }
+        return Int(d)
+    }
+
+    func bool(_ keys: String...) -> Bool { boolArr(keys) }
+
+    func list(_ keys: String...) -> [J] { listArr(keys) }
+
+    // Внутренние версии с обычным массивом (Swift не разворачивает массив в variadic)
+    private func valueArr(_ keys: [String]) -> Any? {
+        for k in keys { if let x = dict[k], !(x is NSNull) { return x } }
+        return nil
+    }
+
+    private func numArr(_ keys: [String]) -> Double? {
+        guard let x = valueArr(keys) else { return nil }
         switch x {
         case let n as NSNumber: return n.doubleValue
         case let s as String: return Double(s.replacingOccurrences(of: ",", with: "."))
@@ -79,13 +96,8 @@ struct J {
         }
     }
 
-    func int(_ keys: String...) -> Int? {
-        guard let d = num(keys...) else { return nil }
-        return Int(d)
-    }
-
-    func bool(_ keys: String...) -> Bool {
-        guard let x = value(keys...) else { return false }
+    private func boolArr(_ keys: [String]) -> Bool {
+        guard let x = valueArr(keys) else { return false }
         switch x {
         case let b as NSNumber: return b.boolValue
         case let s as String: return ["1", "true", "yes", "on", "up"].contains(s.lowercased())
@@ -93,8 +105,8 @@ struct J {
         }
     }
 
-    func list(_ keys: String...) -> [J] {
-        guard let a = value(keys...) as? [Any] else { return [] }
+    private func listArr(_ keys: [String]) -> [J] {
+        guard let a = valueArr(keys) as? [Any] else { return [] }
         return a.map { J($0) }
     }
 }
