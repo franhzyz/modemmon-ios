@@ -308,9 +308,10 @@ struct RouterService {
                                                 listenPort: Int(p[3]) ?? nil,
                                                 publicKey: p.count > 2 ? p[2] : "")
                     order.append(name)
-                } else {
-                    byIface[name]?.listenPort = Int(p[3]) ?? byIface[name]?.listenPort
-                    if p.count > 2 { byIface[name]?.publicKey = p[2] }
+                } else if var inst = byIface[name] {
+                    inst.listenPort = Int(p[3]) ?? inst.listenPort
+                    if p.count > 2 { inst.publicKey = p[2] }
+                    byIface[name] = inst
                 }
             } else if p.count >= 8 {
                 // пир: iface, pub, psk, endpoint, allowed, latest, rx, tx, ka
@@ -485,7 +486,7 @@ struct RouterService {
             let parts = key.split(separator: ".").map(String.init)
             guard parts.count >= 2, parts[0] == name else { continue }
             let secRaw = parts[1]
-            var secName = secRaw
+            let secName = secRaw
             var secType = ""
             var anon = false
             if secRaw.hasPrefix("@") {
@@ -540,7 +541,7 @@ struct RouterService {
         do {
             try await ubus.fileWriteText(path, text)
         } catch {
-            try await exec("cat > \(path.shellQ) << 'MMFEOF'\n\(text)\nMMFEOF\necho written")
+            _ = try await exec("cat > \(path.shellQ) << 'MMFEOF'\n\(text)\nMMFEOF\necho written")
         }
     }
 
