@@ -23,14 +23,13 @@ workflows:
             -target ModemMon \
             -configuration Release \
             -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            SYMROOT="$PWD/build" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build
       - name: Package zip
         script: |
           set -e
-          cd $CM_BUILD_DIR/ModemMon-iOS/build/Build/Products/Release-iphoneos
+          cd $CM_BUILD_DIR/ModemMon-iOS/build/Release-iphoneos
           zip -qry "$CM_BUILD_DIR/ModemMon-unsigned.zip" ModemMon.app
     artifacts:
       - ModemMon-unsigned.zip
