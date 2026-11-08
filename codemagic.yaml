@@ -32,9 +32,8 @@ workflows:
           set -e
           cd $CM_BUILD_DIR/ModemMon-iOS/build/Build/Products/Release-iphoneos
           zip -qry "$CM_BUILD_DIR/ModemMon-unsigned.zip" ModemMon.app
-    publishing:
-      artifacts:
-        - ModemMon-unsigned.zip
+    artifacts:
+      - ModemMon-unsigned.zip
 
   ios-signed:
     name: ModemMon iOS (signed, development)
@@ -54,6 +53,5 @@ workflows:
           xcode-project build-ipa \
             --project ModemMon.xcodeproj \
             --config Release
-    publishing:
-      artifacts:
-        - ModemMon-iOS/build/ios/ipa/*.ipa
+    artifacts:
+      - ModemMon-iOS/build/ios/ipa/*.ipa
