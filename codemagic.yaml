@@ -26,10 +26,18 @@ workflows:
             SYMROOT="$PWD/build" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build
-      - name: Package zip
+      - name: Package zip (с иконкой)
         script: |
           set -e
           cd $CM_BUILD_DIR/ModemMon-iOS/build/Release-iphoneos
+          # иконки в бандл + регистрация в Info.plist (фаза ресурсов иногда не копирует их сама)
+          cp $CM_BUILD_DIR/ModemMon-iOS/ModemMon/AppIcon@2x.png ModemMon.app/ 2>/dev/null || true
+          cp $CM_BUILD_DIR/ModemMon-iOS/ModemMon/AppIcon@3x.png ModemMon.app/ 2>/dev/null || true
+          PLIST=ModemMon.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons dict" $PLIST 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon dict" $PLIST 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array" $PLIST 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0 string AppIcon" $PLIST 2>/dev/null || true
           zip -qry "$CM_BUILD_DIR/ModemMon-unsigned.zip" ModemMon.app
     artifacts:
       - ModemMon-unsigned.zip
