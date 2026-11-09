@@ -32,15 +32,17 @@ struct RouterService {
         return r.stdout
     }
 
-    // MARK: - Модем (medvemodem CGI)
+    // MARK: - Модем (medvemodem CGI + ModemManager/mmcli)
 
-    /// CGI с дружелюбной ошибкой, если старого /cgi-bin/modem на роутере нет.
+    /// Старый CGI medvemodem; на новых прошивках его нет — кидает http(404).
     private func cgi(_ pathAndQuery: String, timeout: Double = 10) async throws -> J {
-        do {
-            return try await http.getJSON(pathAndQuery, timeout: timeout)
-        } catch MmError.http(let code) where code == 404 {
-            throw MmError.backend("На этом роутере нет /cgi-bin/modem — SMS/USSD/AT через CGI недоступны (телеметрия при этом может работать)")
-        }
+        try await http.getJSON(pathAndQuery, timeout: timeout)
+    }
+
+    /// mmcli — ModemManager (есть на OpenWrt 24.10+/25.x)
+    private func mm(_ args: String, timeout: Double = 25) async throws -> String {
+        let r = try await exec("mmcli \(args) 2>&1")
+        return r.stdout
     }
 
     func modemStatus() async throws -> ModemSnapshot {
@@ -54,46 +56,228 @@ struct RouterService {
         }
     }
 
-    /// Список SMS: GET {modemPath}?op=sms_list
+    // MARK: SMS
+
     func smsList() async throws -> [Sms] {
-        let j = try await cgi("\(profile.modemPath)?op=sms_list")
-        return j.list("sms", "messages", "list").map { m in
-            Sms(id: m.string("id", "index") ?? UUID().uuidString,
-                number: m.string("number", "from", "sender") ?? "",
-                text: m.string("text", "body", "content") ?? "",
-                ts: m.num("ts", "timestamp", "time").map { Date(timeIntervalSince1970: $0 < 1e12 ? $0 : $0 / 1000) },
-                isNew: m.bool("new", "unread"))
+        do {
+            let j = try await cgi("\(profile.modemPath)?op=sms_list")
+            return j.list("sms", "messages", "list").map { m in
+                Sms(id: m.string("id", "index") ?? UUID().uuidString,
+                    number: m.string("number", "from", "sender") ?? "",
+                    text: m.string("text", "body", "content") ?? "",
+                    ts: m.num("ts", "timestamp", "time").map { Date(timeIntervalSince1970: $0 < 1e12 ? $0 : $0 / 1000) },
+                    isNew: m.bool("new", "unread"))
+            }
+        } catch MmError.http(let code) where code == 404 {
+            return try await smsListViaMm()
         }
     }
 
+    private func smsListViaMm() async throws -> [Sms] {
+        let out = try await mm("-m any --messaging-list-sms")
+        var ids: [Int] = []
+        for chunk in out.split(separator: "/") {
+            let part = chunk.prefix(while: { $0.isNumber })
+            if let n = Int(part), !ids.contains(n) { ids.append(n) }
+        }
+        guard !ids.isEmpty else { return [] }
+        var res: [Sms] = []
+        for id in ids.suffix(60) {
+            let dump = try await mm("-s \(id)")
+            res.append(parseMmSms(id, dump))
+        }
+        return res.reversed()
+    }
+
+    private func parseMmSms(_ id: Int, _ dump: String) -> Sms {
+        var number = "", state = "received", ts: Date?
+        var textLines: [String] = []
+        var collecting = false
+        for raw in dump.split(separator: "\n") {
+            guard raw.contains("|") else { continue }
+            let seg = raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).last.map(String.init) ?? ""
+            let t = seg.trimmingCharacters(in: .whitespaces)
+            if collecting {
+                if t.hasPrefix("pdu type:") || t.hasPrefix("state:") || t.hasPrefix("storage:") || t.hasPrefix("smsc:") || t.hasPrefix("timestamp:") {
+                    collecting = false
+                } else {
+                    textLines.append(t)
+                    continue
+                }
+            }
+            if t.hasPrefix("number:") { number = String(t.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+            if t.hasPrefix("text:") { collecting = true; textLines.append(String(t.dropFirst(5)).trimmingCharacters(in: .whitespaces)) }
+            if t.hasPrefix("state:") { state = String(t.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
+            if t.hasPrefix("timestamp:") { ts = parseMmDate(String(t.dropFirst(10)).trimmingCharacters(in: .whitespaces)) }
+        }
+        let text = textLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return Sms(id: String(id), number: number, text: text.isEmpty ? "(без текста)" : text, ts: ts, isNew: state == "received")
+    }
+
+    private func parseMmDate(_ s: String) -> Date? {
+        if let d = ISO8601DateFormatter().date(from: s) { return d }
+        for f in ["yyyy-MM-dd'T'HH:mm:ssZZZZZ", "yyyy-MM-dd'T'HH:mm:ss"] {
+            let df = DateFormatter()
+            df.dateFormat = f
+            df.locale = Locale(identifier: "en_US_POSIX")
+            if let d = df.date(from: s) { return d }
+        }
+        return nil
+    }
+
     func smsSend(number: String, text: String) async throws {
-        _ = try await cgi("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
+        do {
+            _ = try await cgi("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
+        } catch MmError.http(let code) where code == 404 {
+            let created = try await mm("-m any --messaging-create-sms=\"text='\(text.shellDQ)',number='\(number.shellDQ)'\"", timeout: 30)
+            guard let r = created.range(of: "/org/freedesktop/ModemManager1/SMS/") else {
+                throw MmError.backend("mmcli не создал SMS: \(created.prefix(200))")
+            }
+            var end = r.upperBound
+            while end < created.endIndex, let d = created[end].wholeNumberValue { end = created.index(after: end) }
+            let path = String(created[r.lowerBound..<end])
+            let sent = try await mm("-m any --messaging-send-sms=\(path)", timeout: 60)
+            if sent.lowercased().contains("error") { throw MmError.backend("Отправка SMS: \(sent.prefix(200))") }
+        }
     }
 
     func smsDelete(id: String) async throws {
-        _ = try await cgi("\(profile.modemPath)?op=sms_delete&id=\(id.enc)")
+        do {
+            _ = try await cgi("\(profile.modemPath)?op=sms_delete&id=\(id.enc)")
+        } catch MmError.http(let code) where code == 404 {
+            _ = try await mm("-m any --messaging-delete-sms=/org/freedesktop/ModemManager1/SMS/\(id)")
+        }
     }
 
-    func ussdStart(code: String) async throws {
-        _ = try await cgi("\(profile.modemPath)?op=ussd_start&code=\(code.enc)", timeout: 30)
+    // MARK: USSD
+
+    /// Отправить USSD и вернуть ответ сети (CGI или mmcli).
+    func ussdRun(code: String) async throws -> String {
+        do {
+            _ = try await cgi("\(profile.modemPath)?op=ussd_start&code=\(code.enc)", timeout: 30)
+            for _ in 0..<20 {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                let j = try await cgi("\(profile.modemPath)?op=ussd_status")
+                let reply = j.string("reply", "text", "ussd_reply") ?? ""
+                let st = j.string("status", "ussd_status") ?? ""
+                if !reply.isEmpty { return reply }
+                if st.contains("fail") || st.contains("error") { return "Ошибка сети: \(st)" }
+            }
+            return "(нет ответа за 20 с)"
+        } catch MmError.http(let c) where c == 404 {
+            let out = try await mm("-m any --3gpp-ussd-initiate='\(code.shellQ)'", timeout: 60)
+            if let r = out.range(of: "reply from network:") {
+                var s = String(out[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if s.hasPrefix("'") { s = String(s.dropFirst()) }
+                if s.hasSuffix("'") { s = String(s.dropLast()) }
+                return s
+            }
+            return out.isEmpty ? "(пустой ответ)" : out
+        }
     }
 
-    /// Статус USSD-сессии.
-    func ussdStatus() async throws -> (status: String, reply: String) {
-        let j = try await cgi("\(profile.modemPath)?op=ussd_status")
-        return (j.string("status", "ussd_status") ?? "", j.string("reply", "text", "ussd_reply") ?? "")
-    }
+    // MARK: AT
 
     func sendAt(_ cmd: String) async throws -> String {
-        let j = try await cgi("\(profile.modemPath)?op=at&cmd=\(cmd.enc)", timeout: 20)
-        return j.string("reply", "response", "at_reply", "text") ?? ""
+        do {
+            let j = try await cgi("\(profile.modemPath)?op=at&cmd=\(cmd.enc)", timeout: 20)
+            return j.string("reply", "response", "at_reply", "text") ?? ""
+        } catch MmError.http(let code) where code == 404 {
+            return try await sendAtViaTty(cmd)
+        }
     }
 
-    /// Лок бэндов. Имя op может отличаться в зависимости от версии medvemodem —
-    /// правится здесь, в одном месте.
+    /// AT напрямую в последовательный порт модема (ммcli без debug-режима запрещает --command).
+    private func sendAtViaTty(_ cmd: String) async throws -> String {
+        let port = try await findAtPort()
+        let script = "P=/dev/\(port); stty -F $P 115200 raw -echo 2>/dev/null; " +
+            "(sleep 1; printf '%s\\r' '\(cmd.shellQ)' > $P) & timeout 4 cat $P 2>/dev/null | tr -d '\\r'"
+        let out = try await execText(script)
+        var lines = out.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if let first = lines.first, first.trimmingCharacters(in: .whitespaces) == cmd { lines.removeFirst() }
+        let clean = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? "(нет ответа)" : clean
+    }
+
+    private func findAtPort() async throws -> String {
+        for p in ["ttyUSB2", "ttyUSB3", "ttyUSB1", "ttyUSB0"] {
+            let script = "(sleep 1; printf 'ATI\\r' > /dev/\(p)) & timeout 3 cat /dev/\(p) 2>/dev/null | tr -d '\\r'"
+            let out = (try? await execText(script)) ?? ""
+            if out.contains("Manufacturer") || out.contains("OK") || out.contains("ERROR") { return p }
+        }
+        throw MmError.backend("AT-порт модема не найден (проверял ttyUSB0-3)")
+    }
+
+    // MARK: Бэнды
+
+    struct BandsInfo { var supported: [String]; var allowed: [String] }
+
+    func bandsInfo() async throws -> BandsInfo {
+        do {
+            let j = try await cgi("\(profile.modemPath)?op=status")
+            let sup = j.stringsSafe("supported_bands", "supportedBands")
+            let act = j.stringsSafe("bands", "active_bands")
+            if !sup.isEmpty { return BandsInfo(supported: sup, allowed: act) }
+        } catch MmError.http(let code) where code == 404 {
+            // mmcli ниже
+        }
+        let out = try await mm("-m any 2>&1")
+        return parseMmBands(out)
+    }
+
+    private func parseMmBands(_ out: String) -> BandsInfo {
+        var supported: [String] = []
+        var allowed: [String] = []
+        var target: [String]? = nil
+
+        func collect(_ seg: String) {
+            guard var arr = target else { return }
+            for tok in seg.split(whereSeparator: { $0 == "," || $0 == " " }) {
+                let s = tok.trimmingCharacters(in: .whitespaces)
+                if s.isEmpty || s == "|" { continue }
+                arr.append(s)
+                target = arr
+            }
+        }
+
+        for raw in out.split(separator: "\n") {
+            guard raw.contains("|") else { continue }
+            let seg = raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).last.map(String.init) ?? ""
+            let t = seg.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("supported:") { target = supported; collect(String(t.dropFirst(10))) }
+            else if t.hasPrefix("current:") { target = allowed; collect(String(t.dropFirst(8))) }
+            else if t == "IP" { target = nil }
+            else if target != nil { collect(t) }
+        }
+        // дедуп с сохранением порядка
+        func dedup(_ a: [String]) -> [String] {
+            var seen = Set<String>(); var res: [String] = []
+            for x in a where !seen.contains(x) { seen.insert(x); res.append(x) }
+            return res
+        }
+        return BandsInfo(supported: dedup(supported), allowed: dedup(allowed))
+    }
+
+    /// Лок бэндов: CGI (старые прошивки) или mmcli --set-allowed-bands.
     func applyBands(_ bands: [String]) async throws {
-        let csv = bands.joined(separator: ",")
-        _ = try await http.getJSON("\(profile.modemPath)?op=bands_set&bands=\(csv.enc)", timeout: 40)
+        do {
+            let csv = bands.joined(separator: ",")
+            _ = try await cgi("\(profile.modemPath)?op=bands_set&bands=\(csv.enc)", timeout: 40)
+        } catch MmError.http(let code) where code == 404 {
+            let mmNames = bands.map { bandToMm($0) }
+            guard !mmNames.isEmpty else { return }
+            let list = mmNames.joined(separator: ",")
+            let out = try await mm("-m any --set-allowed-bands=\(list)", timeout: 60)
+            if out.lowercased().contains("error") { throw MmError.backend("Лок бэндов: \(out.prefix(200))") }
+        }
+    }
+
+    private func bandToMm(_ b: String) -> String {
+        let s = b.lowercased().replacingOccurrences(of: " ", with: "")
+        if s.hasPrefix("b"), let n = Int(s.dropFirst()) { return "eutran-\(n)" }
+        if s.hasPrefix("n"), let n = Int(s.dropFirst()) { return "ngran-\(n)" }
+        if s.hasPrefix("w"), let n = Int(s.dropFirst()) { return "utran-\(n)" }
+        return s
     }
 
     // MARK: - Быстрый системный опрос (дашборд)
@@ -155,21 +339,24 @@ struct RouterService {
     // MARK: - Сеть: интерфейсы
 
     func interfaces() async throws -> [Iface] {
-        // Список netifd-интерфейсов из uci + живой статус из ubus.
-        let list = try await execText("ubus list 'network.interface.*' | sed 's/network.interface\\.//'")
+        // Список netifd-интерфейсов + живой статус. Статус берём через шелл:
+        // прямой ubus-вызов может быть закрыт ACL, а из-под root-шелла работает всегда.
+        let list = try await execText("ubus list 'network.interface.*' | sed 's/network\\.interface\\.//'")
         var res: [Iface] = []
         for name in list.split(separator: "\n").map(String.init).filter({ !$0.isEmpty }) {
-            let st = try? await ubus.callData("network.interface.\(name)", "status")
             var f = Iface(name: name)
-            f.proto = st?.string("proto") ?? ""
-            f.device = st?.string("device", "l3_device") ?? ""
-            f.up = st?.bool("up") ?? false
-            f.uptime = st?.int("uptime")
-            f.ips = st?.list("ipv4-address").compactMap { $0.sub()?.string("address") } ?? []
-            if let route = st?.list("route").first(where: { $0.sub("target")?.string("target") == "0.0.0.0" })?.sub() {
-                f.gateway = route.string("gateway") ?? ""
+            if let raw = try? await execText("ubus call network.interface.\(name) status"),
+               let data = raw.data(using: .utf8), let st = J(data: data) {
+                f.proto = st.string("proto") ?? ""
+                f.device = st.string("l3_device") ?? st.string("device") ?? ""
+                f.up = st.bool("up")
+                f.uptime = st.int("uptime")
+                f.ips = st.list("ipv4-address").compactMap { $0.sub()?.string("address") }
+                if let route = st.list("route").first(where: { $0.sub("target")?.string("target") == "0.0.0.0" })?.sub() {
+                    f.gateway = route.string("gateway") ?? ""
+                }
+                f.dns = st.list("dns-server").compactMap { $0.string() }
             }
-            f.dns = st?.list("dns-server").compactMap { $0.string() } ?? []
             res.append(f)
         }
         // трафик с /proc/net/dev
@@ -278,9 +465,10 @@ struct RouterService {
         for dev in try await wifiDevices() {
             let d = try await ubus.callData("iwinfo", "assoclist", ["device": dev])
             for c in d.list("results") {
+                let sig = c.int("signal")
                 res.append(WifiClient(mac: (c.string("mac") ?? "?").uppercased(),
                                       ifname: dev,
-                                      signal: c.int("signal"),
+                                      signal: (sig != nil && sig != 0) ? sig : nil,
                                       noise: c.int("noise"),
                                       rxRate: c.sub("rx")?.num("rate") ?? c.num("rx", "rate"),
                                       txRate: c.sub("tx")?.num("rate") ?? c.num("tx", "rate"),
@@ -364,7 +552,7 @@ struct RouterService {
         var o = try await quickSys()
         // частоты и загрузка ядер
         let coresOut = try? await execText(
-            "i=0; for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq; do echo \"$i=$(($(cat $f) / 1000))\"; i=$((i+1)); done"
+            "i=0; for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do [ -f \"$f\" ] || continue; echo \"$i=$(awk '{printf \"%d\", $1/1000}' $f)\"; i=$((i+1)); done"
         )
         var cores: [CpuCore] = []
         for line in (coresOut ?? "").split(separator: "\n") {
@@ -616,6 +804,14 @@ extension String {
     /// Безопасно вставить строку в одинарные кавычки внутри shell.
     var shellQ: String {
         self.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    /// Экранирование для вставки внутрь двойных кавычек shell.
+    var shellDQ: String {
+        self.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
     }
 
     /// URL-кодирование параметров запроса.
