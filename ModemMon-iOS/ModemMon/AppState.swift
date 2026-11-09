@@ -44,7 +44,9 @@ final class AppState: ObservableObject {
         profiles = Store.loadProfiles()
         activeId = Store.loadActiveId()
         settings = Store.loadSettings()
-        if activeId == nil { activeId = profiles.first?.id }
+        if activeId == nil || !profiles.contains(where: { $0.id == activeId }) {
+            activeId = profiles.first?.id
+        }
     }
 
     var active: RouterProfile? {
@@ -72,12 +74,12 @@ final class AppState: ObservableObject {
             ubus = client
             activeProfile = p
             conn = .connected
-            // ACL ставим в фоне, как в Android-версии
-            Task.detached { [client] in
-                let has = await Install.aclInstalled(client)
-                if !has {
-                    try? await Install.installAcl(client)
-                }
+            // ACL: если его ещё нет — ставим синхронно и перелогиниваемся,
+            // потому что установка перезапускает rpcd и старая сессия умирает
+            let has = (try? await Install.aclInstalled(client)) ?? false
+            if !has {
+                try? await Install.installAcl(client)
+                try? await client.login(user: p.user, pass: password)
             }
             startPolling()
         } catch {
@@ -165,28 +167,43 @@ final class AppState: ObservableObject {
             return
         }
         guard let svc = service else { return }
+
+        // Живость связи: системный опрос обязателен
         do {
-            // Системные метрики — обязательны (это живой ubus-канал)
-            async let s = svc.quickSys()
-            async let dev = svc.netDev()
-            let (sres, devs) = try await (s, dev)
-            sys = sres
-            updateRates(devs)
+            sys = try await svc.quickSys()
             failCount = 0
-            // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере
-            if let mres = try? await svc.modemStatus() {
-                modem = mres
-            }
-            appendTrend()
-            if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
-                await checkUplink()
-            }
         } catch {
+            // сессия могла умереть (например, ставили ACL — rpcd перезапускался)
+            if case MmError.sessionExpired = error { await relogin(); return }
+            if case MmError.ubus(let code) = error, code == 6 { await relogin(); return }
             failCount += 1
             if failCount >= 3 {
                 disconnect()
-                connError = "Связь потеряна: \(error.localizedDescription)"
+                connError = "Связь потеряна (шаг: системный опрос): \(error.localizedDescription)"
             }
+            return
+        }
+        // Остальное — по возможности
+        if let devs = try? await svc.netDev() { updateRates(devs) }
+        // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере
+        if let mres = try? await svc.modemStatus() {
+            modem = mres
+        }
+        appendTrend()
+        if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
+            await checkUplink()
+        }
+    }
+
+    /// Перелогин с сохранением подключения.
+    private func relogin() async {
+        guard let p = activeProfile, let svc = service else { return }
+        do {
+            try await svc.ubus.login(user: p.user, pass: password(for: p))
+            failCount = 0
+        } catch {
+            disconnect()
+            connError = "Сессия истекла, перелогин не удался: \(error.localizedDescription)"
         }
     }
 
@@ -226,7 +243,7 @@ final class AppState: ObservableObject {
             uplink = UplinkState(st: .ok, latencyMs: DemoSource.jitter(40, 10), path: "wwan0", checkedAt: Date(), detail: "demo")
             return
         }
-        guard var svc = service else { return }
+        guard let svc = service else { return }
         let ifaces = ["wwan0", "wwan1", "eth1", "usb0"]
         for f in ifaces {
             if let probe = try? await svc.uplinkProbe(iface: f), probe.ok {
