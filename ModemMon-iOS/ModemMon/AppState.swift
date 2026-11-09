@@ -188,6 +188,14 @@ final class AppState: ObservableObject {
         // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере
         if let mres = try? await svc.modemStatus() {
             modem = mres
+            // телеметрия сама говорит про интернет — не гоняем лишний curl
+            if let on = mres.online {
+                uplink = UplinkState(st: on ? .ok : .fail,
+                                     latencyMs: mres.reachLatencyMs ?? uplink.latencyMs,
+                                     path: "wwan0",
+                                     checkedAt: Date(),
+                                     detail: "telemetry")
+            }
         }
         appendTrend()
         if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
