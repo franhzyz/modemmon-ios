@@ -219,70 +219,82 @@ struct CellsView: View {
 
 struct BandsView: View {
     @EnvironmentObject var app: AppState
+    @State private var supported: [String] = []
+    @State private var allowed: [String] = []
     @State private var selected: Set<String> = []
     @State private var loaded = false
     @State private var busy = false
 
     var body: some View {
         List {
-            if let m = app.modem {
-                Section {
-                    Text("Активные: \(m.activeBands.joined(separator: ", ").isEmpty ? "—" : m.activeBands.joined(separator: ", "))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Сейчас в работе")
-                }
+            Section {
+                Text(allowed.isEmpty ? "—" : allowed.joined(separator: ", "))
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Сейчас разрешены (allowed)")
+            }
 
-                Section {
-                    if m.supportedBands.isEmpty {
-                        Text("Список поддерживаемых бэндов пуст — проверьте medvemodem.").foregroundStyle(.secondary)
-                    }
-                    ForEach(m.supportedBands, id: \.self) { b in
-                        Button {
-                            if selected.contains(b) { selected.remove(b) } else { selected.insert(b) }
-                        } label: {
-                            HStack {
-                                Text(b)
-                                    .font(.system(.body, design: .monospaced).weight(.medium))
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: selected.contains(b) ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(selected.contains(b) ? Color.accentColor : .secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Лок бэндов (выбери разрешённые)")
-                } footer: {
-                    Text("Пустой выбор = все бэнды. Применение заставит модем перерегистрироваться в сети — связь пропадёт на несколько секунд.")
+            Section {
+                if supported.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity)
                 }
-
-                Section {
+                ForEach(supported, id: \.self) { b in
                     Button {
-                        Task { await apply() }
+                        if selected.contains(b) { selected.remove(b) } else { selected.insert(b) }
                     } label: {
                         HStack {
+                            Text(b)
+                                .font(.system(.body, design: .monospaced).weight(.medium))
+                                .foregroundStyle(.primary)
                             Spacer()
-                            if busy { ProgressView().padding(.trailing, 8) }
-                            Text("Применить (\(selected.count))").bold()
-                            Spacer()
+                            Image(systemName: selected.contains(b) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selected.contains(b) ? Color.accentColor : .secondary)
                         }
                     }
-                    .disabled(busy)
-                    Button("Сбросить выбор") { selected = Set(m.activeBands) }
-                        .foregroundStyle(.secondary)
                 }
-            } else {
-                Section { ProgressView().frame(maxWidth: .infinity) }
+            } header: {
+                Text("Лок бэндов (выбери разрешённые)")
+            } footer: {
+                Text("Пустой выбор = все бэнды. Применение заставит модем перерегистрироваться в сети — связь пропадёт на несколько секунд.")
+            }
+
+            Section {
+                Button {
+                    Task { await apply() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if busy { ProgressView().padding(.trailing, 8) }
+                        Text("Применить (\(selected.count))").bold()
+                        Spacer()
+                    }
+                }
+                .disabled(busy)
+                Button("Разрешить все (сбросить лок)") { selected = supported }
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Бэнды")
         .onAppear {
             if !loaded {
                 loaded = true
-                selected = Set(app.modem?.activeBands ?? [])
+                Task { await load() }
             }
+        }
+    }
+
+    private func load() async {
+        if app.conn == .demo {
+            supported = ["B1", "B3", "B7", "B20", "n78"]
+            allowed = ["B3", "n78"]
+            selected = Set(allowed)
+            return
+        }
+        if let info = await app.run({ svc in try await svc.bandsInfo() }) {
+            supported = info.supported
+            allowed = info.allowed
+            selected = Set(info.allowed)
         }
     }
 
@@ -292,6 +304,10 @@ struct BandsView: View {
         guard app.conn != .demo else { return }
         do {
             try await app.service?.applyBands(Array(selected).sorted())
+            if let info = await app.run({ svc in try await svc.bandsInfo() }) {
+                allowed = info.allowed
+                supported = info.supported
+            }
         } catch {
             app.banner = "Бэнды: \(error.localizedDescription)"
         }
@@ -397,7 +413,6 @@ struct UssdTab: View {
     @State private var status = ""
     @State private var reply = ""
     @State private var busy = false
-    @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -430,37 +445,26 @@ struct UssdTab: View {
                 }
             }
         }
-        .onDisappear { pollTask?.cancel() }
     }
 
     private func start() async {
         busy = true
         reply = ""
         status = "отправляем…"
-        await app.run { svc in try await svc.ussdStart(code: code) }
-        pollTask?.cancel()
-        pollTask = Task {
-            for _ in 0..<30 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled { break }
-                if app.conn == .demo {
-                    status = "done"; reply = "На счету 312.45 руб. Демо."; busy = false; return
-                }
-                let r = await app.run { svc in try await svc.ussdStatus() }
-                if let r {
-                    status = r.status
-                    if !r.reply.isEmpty {
-                        reply = r.reply
-                        busy = false
-                        return
-                    }
-                    if r.status.contains("fail") || r.status.contains("error") {
-                        busy = false
-                        return
-                    }
-                }
-            }
+        if app.conn == .demo {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            status = "готово"
+            reply = "На счету 312.45 руб. Демо."
             busy = false
+            return
+        }
+        let r = await app.run { svc in try await svc.ussdRun(code: code) }
+        busy = false
+        if let r {
+            status = "готово"
+            reply = r
+        } else {
+            status = "ошибка — см. баннер"
         }
     }
 }
