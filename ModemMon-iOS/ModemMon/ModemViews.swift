@@ -271,7 +271,7 @@ struct BandsView: View {
                     }
                 }
                 .disabled(busy)
-                Button("Разрешить все (сбросить лок)") { selected = supported }
+                Button("Разрешить все (сбросить лок)") { selected = Set(supported) }
                     .foregroundStyle(.secondary)
             }
         }
