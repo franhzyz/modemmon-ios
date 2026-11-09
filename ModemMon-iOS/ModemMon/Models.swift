@@ -178,9 +178,66 @@ struct ModemSnapshot {
     var ussdReply: String = ""
     var ussdStatus: String = ""
 
+    var online: Bool?
+    var reachLatencyMs: Double?
+
     static let empty = ModemSnapshot()
 
     init() {}
+
+    /// Схема 2: /cgi-bin/modem-telemetry (новые medvemodem)
+    init(telemetry: J) {
+        online = telemetry.bool("online")
+        reachLatencyMs = telemetry.sub("engine")?.num("reach_latency_ms")
+
+        operatorName = telemetry.string("operator") ?? telemetry.sub("sim")?.string("operator_name") ?? ""
+        operatorCode = telemetry.sub("sim")?.string("operator_code") ?? telemetry.string("plmn") ?? ""
+        registration = telemetry.sub("network_info")?.string("registration") ?? ""
+        rat = telemetry.string("rat") ?? telemetry.string("network") ?? ""
+        sim.imsi = telemetry.sub("sim")?.string("imsi_masked") ?? ""
+        sim.iccid = telemetry.sub("sim")?.string("iccid_masked") ?? ""
+        sim.imei = telemetry.sub("device")?.string("imei_masked") ?? ""
+
+        let lte = telemetry.sub("lte")
+        lteRsrp = lte?.num("rsrp") ?? telemetry.num("rsrp")
+        lteRsrq = lte?.num("rsrq") ?? telemetry.num("rsrq")
+        lteSinr = lte?.num("sinr") ?? telemetry.num("sinr")
+        lteRssi = lte?.num("rssi") ?? telemetry.num("rssi")
+        let nr = telemetry.sub("nr")
+        if nr?.bool("present") == true || nr?.bool("active") == true {
+            nrRsrp = nr?.num("rsrp")
+            nrRsrq = nr?.num("rsrq")
+            nrSinr = nr?.num("sinr")
+        }
+
+        cellId = lte?.int("cell_id") ?? telemetry.int("cell_id")
+        earfcn = lte?.int("earfcn")
+        pci = lte?.int("pci") ?? telemetry.int("pci")
+        band = telemetry.string("band") ?? lte?.string("band") ?? ""
+
+        let dev = telemetry.sub("device")
+        tempModem = dev?.num("temp_c") ?? telemetry.num("temp_c")
+        tempPa = dev?.num("temp_pa_c")
+        tempSkin = dev?.num("temp_skin_c")
+        tempSource = dev?.string("temp_source") ?? ""
+        tempStatus = dev?.string("temp_status") ?? ""
+
+        qualityPercent = dev?.num("signal_quality_percent")
+        modelName = dev?.string("model") ?? ""
+        fwVersion = dev?.string("firmware") ?? ""
+
+        signalHistory = telemetry.sub("signal_history")?.list("points").compactMap { $0.num("lte_rsrp") ?? $0.num("rsrp") } ?? []
+        neighbors = telemetry.list("neighbors").map { c in
+            NeighborCell(rat: c.string("tech") ?? c.string("rat") ?? "",
+                         earfcn: c.int("earfcn") ?? c.int("arfcn"),
+                         pci: c.int("pci"),
+                         rsrp: c.num("rsrp"),
+                         rsrq: c.num("rsrq"),
+                         band: c.string("band") ?? "")
+        }
+        activeBands = band.isEmpty ? [] : [band]
+        ussdStatus = ""
+    }
 
     init(j: J) {
         operatorName = j.string("operator_name", "operatorName", "operator") ?? ""
