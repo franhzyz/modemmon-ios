@@ -140,10 +140,18 @@ actor UbusClient {
     }
 
     func fileExec(_ script: String) async throws -> ExecResult {
-        let d = try await callData("file", "exec", ["path": "/bin/sh", "params": ["-c", script]])
-        return ExecResult(code: d.int("code") ?? -1,
-                          stdout: d.string("stdout") ?? "",
-                          stderr: d.string("stderr") ?? "")
+        func run(_ key: String) async throws -> ExecResult {
+            let d = try await callData("file", "exec", [key: "/bin/sh", "params": ["-c", script]])
+            return ExecResult(code: d.int("code") ?? -1,
+                              stdout: d.string("stdout") ?? "",
+                              stderr: d.string("stderr") ?? "")
+        }
+        // Новые rpcd (OpenWrt 25.x) ждут "command", старые — "path"
+        do {
+            return try await run("command")
+        } catch MmError.ubus(let code) where code == 2 || code == 3 {
+            return try await run("path")
+        }
     }
 
     func fileRead(_ path: String) async throws -> Data {
