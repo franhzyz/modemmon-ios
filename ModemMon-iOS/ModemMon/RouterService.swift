@@ -34,14 +34,29 @@ struct RouterService {
 
     // MARK: - Модем (medvemodem CGI)
 
+    /// CGI с дружелюбной ошибкой, если старого /cgi-bin/modem на роутере нет.
+    private func cgi(_ pathAndQuery: String, timeout: Double = 10) async throws -> J {
+        do {
+            return try await http.getJSON(pathAndQuery, timeout: timeout)
+        } catch MmError.http(let code) where code == 404 {
+            throw MmError.backend("На этом роутере нет /cgi-bin/modem — SMS/USSD/AT через CGI недоступны (телеметрия при этом может работать)")
+        }
+    }
+
     func modemStatus() async throws -> ModemSnapshot {
-        let j = try await http.getJSON(profile.modemPath)
-        return ModemSnapshot(j: j)
+        do {
+            let j = try await http.getJSON(profile.modemPath)
+            return ModemSnapshot(j: j)
+        } catch MmError.http(let code) where code == 404 {
+            // Новые medvemodem отдают телеметрию по другому пути (schema 2)
+            let j = try await http.getJSON("/cgi-bin/modem-telemetry")
+            return ModemSnapshot(telemetry: j)
+        }
     }
 
     /// Список SMS: GET {modemPath}?op=sms_list
     func smsList() async throws -> [Sms] {
-        let j = try await http.getJSON("\(profile.modemPath)?op=sms_list")
+        let j = try await cgi("\(profile.modemPath)?op=sms_list")
         return j.list("sms", "messages", "list").map { m in
             Sms(id: m.string("id", "index") ?? UUID().uuidString,
                 number: m.string("number", "from", "sender") ?? "",
@@ -52,25 +67,25 @@ struct RouterService {
     }
 
     func smsSend(number: String, text: String) async throws {
-        _ = try await http.getJSON("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
+        _ = try await cgi("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
     }
 
     func smsDelete(id: String) async throws {
-        _ = try await http.getJSON("\(profile.modemPath)?op=sms_delete&id=\(id.enc)")
+        _ = try await cgi("\(profile.modemPath)?op=sms_delete&id=\(id.enc)")
     }
 
     func ussdStart(code: String) async throws {
-        _ = try await http.getJSON("\(profile.modemPath)?op=ussd_start&code=\(code.enc)", timeout: 30)
+        _ = try await cgi("\(profile.modemPath)?op=ussd_start&code=\(code.enc)", timeout: 30)
     }
 
     /// Статус USSD-сессии.
     func ussdStatus() async throws -> (status: String, reply: String) {
-        let j = try await http.getJSON("\(profile.modemPath)?op=ussd_status")
+        let j = try await cgi("\(profile.modemPath)?op=ussd_status")
         return (j.string("status", "ussd_status") ?? "", j.string("reply", "text", "ussd_reply") ?? "")
     }
 
     func sendAt(_ cmd: String) async throws -> String {
-        let j = try await http.getJSON("\(profile.modemPath)?op=at&cmd=\(cmd.enc)", timeout: 20)
+        let j = try await cgi("\(profile.modemPath)?op=at&cmd=\(cmd.enc)", timeout: 20)
         return j.string("reply", "response", "at_reply", "text") ?? ""
     }
 
