@@ -61,13 +61,35 @@ final class AppState: ObservableObject {
     func password(for p: RouterProfile) -> String { Keychain.password(for: p.id.uuidString) }
     func savePassword(_ v: String, for p: RouterProfile) { Keychain.setPassword(v, for: p.id.uuidString) }
 
+    /// Пароль с учётом галочки «Сохранять пароль»: Keychain + резерв в UserDefaults.
+    func storedPassword(for p: RouterProfile) -> String {
+        let kc = Keychain.password(for: p.id.uuidString)
+        if !kc.isEmpty { return kc }
+        guard settings.keepPassword else { return "" }
+        return UserDefaults.standard.string(forKey: "mm.pw." + p.id.uuidString) ?? ""
+    }
+
+    func savePasswordAuto(_ p: RouterProfile, _ pass: String) {
+        savePassword(pass, for: p)
+        if settings.keepPassword {
+            UserDefaults.standard.set(pass, forKey: "mm.pw." + p.id.uuidString)
+        } else {
+            UserDefaults.standard.removeObject(forKey: "mm.pw." + p.id.uuidString)
+        }
+    }
+
+    func clearStoredPasswords(for p: RouterProfile) {
+        Keychain.deletePassword(for: p.id.uuidString)
+        UserDefaults.standard.removeObject(forKey: "mm.pw." + p.id.uuidString)
+    }
+
     // MARK: - Подключение
 
     func connect(_ p: RouterProfile, password: String) async {
         conn = .connecting
         connError = nil
         banner = nil
-        savePassword(password, for: p)
+        savePasswordAuto(p, password)
         let client = UbusClient(base: p.baseURL)
         do {
             try await client.login(user: p.user, pass: password)
@@ -129,7 +151,7 @@ final class AppState: ObservableObject {
             // одна попытка перелогина
             guard let p = activeProfile else { return nil }
             do {
-                try await svc.ubus.login(user: p.user, pass: password(for: p))
+                try await svc.ubus.login(user: p.user, pass: storedPassword(for: p))
                 return try await body(svc)
             } catch {
                 banner = "Сессия истекла, перелогин не удался: \(error.localizedDescription)"
@@ -207,7 +229,7 @@ final class AppState: ObservableObject {
     private func relogin() async {
         guard let p = activeProfile, let svc = service else { return }
         do {
-            try await svc.ubus.login(user: p.user, pass: password(for: p))
+            try await svc.ubus.login(user: p.user, pass: storedPassword(for: p))
             failCount = 0
         } catch {
             disconnect()

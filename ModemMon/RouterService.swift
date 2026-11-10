@@ -129,16 +129,85 @@ struct RouterService {
         do {
             _ = try await cgi("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
         } catch MmError.http(let code) where code == 404 {
-            let created = try await mm("-m any --messaging-create-sms=\"text='\(text.shellDQ)',number='\(number.shellDQ)'\"", timeout: 30)
-            guard let r = created.range(of: "/org/freedesktop/ModemManager1/SMS/") else {
-                throw MmError.backend("mmcli не создал SMS: \(created.prefix(200))")
-            }
-            var end = r.upperBound
-            while end < created.endIndex, let d = created[end].wholeNumberValue { end = created.index(after: end) }
-            let path = String(created[r.lowerBound..<end])
-            let sent = try await mm("-m any --messaging-send-sms=\(path)", timeout: 60)
-            if sent.lowercased().contains("error") { throw MmError.backend("Отправка SMS: \(sent.prefix(200))") }
+            try await smsSendViaAt(number: number, text: text)
         }
+    }
+
+    /// Отправка через AT-порт в PDU-режиме (mmcli 1.24 не умеет send, а текстовый
+    /// AT-режим модема не берёт UCS2). Кириллица — UCS2, длинные — склейка.
+    private func smsSendViaAt(number: String, text: String) async throws {
+        let port = try await findAtPort()
+
+        let ref = UInt8.random(in: 0...255)
+        let maxChars = 67
+        var chars = Array(text)
+        var parts: [[Character]] = []
+        if chars.isEmpty { parts = [[]] }
+        while !chars.isEmpty {
+            let n = min(maxChars, chars.count)
+            parts.append(Array(chars[..<n]))
+            chars.removeFirst(n)
+        }
+
+        var lastError = "нет ответа"
+        for (idx, part) in parts.enumerated() {
+            let pdu = buildSmsSubmitPdu(number: number,
+                                        ucs2Text: String(part),
+                                        ref: ref,
+                                        part: idx + 1,
+                                        total: parts.count)
+            let script = "P=/dev/\(port); stty -F $P 115200 raw -echo 2>/dev/null; " +
+                "(sleep 1; printf 'AT+CMGF=0\\r' > $P; sleep 1; printf 'AT+CMGS=\(pdu.len)\\r' > $P; sleep 2; printf '\(pdu.hex)\\032' > $P) & " +
+                "timeout 18 cat $P 2>/dev/null | tr -d '\\r'"
+            let out = try await execText(script)
+            if out.contains("+CMGS:") { continue } // часть ушла
+            if let r = out.range(of: "+CMS ERROR:") {
+                lastError = String(out[r.lowerBound...]).prefix(140)
+            } else {
+                lastError = String(out.prefix(140))
+            }
+            throw MmError.backend("SMS не отправлена: \(lastError)")
+        }
+    }
+
+    /// SMS-SUBMIT PDU (UCS2, поддержка склейки длинных).
+    private func buildSmsSubmitPdu(number: String, ucs2Text: String, ref: UInt8, part: Int, total: Int) -> (hex: String, len: Int) {
+        let international = number.hasPrefix("+")
+        var digits = international ? String(number.dropFirst()) : number
+        digits = digits.filter { $0.isNumber }
+        if digits.count % 2 == 1 { digits += "F" }
+        var addr = ""
+        let cs = Array(digits)
+        var i = 0
+        while i < cs.count {
+            let a = cs[i]
+            let b = i + 1 < cs.count ? cs[i + 1] : "F"
+            addr += String(b) + String(a)
+            i += 2
+        }
+        let addrLen = cs.count
+        let typeByte = international ? "91" : "81"
+
+        var payload = ucs2Text.data(using: .utf16BigEndian)!.map { String(format: "%02X", $0) }.joined()
+        if total > 1 {
+            let udh = String(format: "060804%02X%02X%02X", ref, total, part)
+            payload = udh + payload
+        }
+
+        var pdu = "00"                     // SCA — по умолчанию
+        pdu += "11"                        // SMS-SUBMIT, VPF relative
+        pdu += "00"                        // MR
+        pdu += typeByte
+        pdu += String(format: "%02X", addrLen)
+        pdu += addr
+        pdu += "00"                        // PID
+        pdu += "08"                        // DCS: UCS2
+        pdu += "00"                        // VP
+        pdu += String(format: "%02X", payload.count / 2)
+        pdu += payload
+
+        let bytesAfterSca = pdu.count / 2 - 1
+        return (pdu, bytesAfterSca)
     }
 
     func smsDelete(id: String) async throws {
@@ -911,6 +980,64 @@ struct RouterService {
         return t
     }
 
+    // MARK: Forkop: дашборд
+
+    struct ForkopCoreStats {
+        var cpuPercent: Double?
+        var memMB: Double?
+        var uptimeSec: Int?
+    }
+
+    func forkopCoreStats() async throws -> ForkopCoreStats {
+        var s = ForkopCoreStats()
+        let out = try await execText(
+            "P=$(pidof sing-box | awk '{print $1}'); " +
+            "if [ -n \"$P\" ]; then " +
+            "A=$(awk '{print $14+$15}' /proc/$P/stat 2>/dev/null); " +
+            "R=$(awk '/VmRSS/{print int($2/1024)}' /proc/$P/status 2>/dev/null); " +
+            "sleep 1; B=$(awk '{print $14+$15}' /proc/$P/stat 2>/dev/null); " +
+            "UP=$(cut -d' ' -f1 /proc/uptime | cut -d. -f1); ST=$(awk '{print $22}' /proc/$P/stat 2>/dev/null); " +
+            "echo cpu=$((B-A)); echo rss=$R; echo up=$((UP-ST/100)); fi"
+        )
+        for line in out.split(separator: "\n") {
+            let kv = line.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2 else { continue }
+            switch kv[0] {
+            case "cpu": s.cpuPercent = Double(kv[1])
+            case "rss": s.memMB = Double(kv[1])
+            case "up": s.uptimeSec = Int(kv[1])
+            default: break
+            }
+        }
+        return s
+    }
+
+    func clashTestGroup(_ group: String, url: String = "https://www.gstatic.com/generate_204") async throws -> [String: Int] {
+        let enc = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
+        let j = try await clashGet("/group/\(enc)/delay?url=\(url.enc)&timeout=5000")
+        var res: [String: Int] = [:]
+        for (name, v) in j.dict {
+            if let n = J(v).int() { res[name] = n }
+        }
+        return res
+    }
+
+    func clashNodeDelays() async throws -> [String: Int] {
+        let j = try await clashGet("/proxies")
+        var res: [String: Int] = [:]
+        for (name, v) in j.dict {
+            let g = J(v)
+            if let h = g.list("history").last, let delay = h.int("delay"), delay > 0 {
+                res[name] = delay
+            }
+        }
+        return res
+    }
+
+    func forkopStateRestart() async throws {
+        _ = try await exec("/etc/init.d/forkop-state restart 2>&1; echo done", allowDangerous: true)
+    }
+
     // MARK: Forkop: диагностика
 
     struct ForkopCheck: Identifiable {
@@ -962,14 +1089,17 @@ struct RouterService {
 
     // MARK: Forkop: управление секциями и ссылками
 
-    /// Сохранить поля секции (nil = не менять). lists — точный состав community_lists.
+    /// Сохранить поля секции (nil = не менять). lists — точный состав community_lists
+    /// (перезаписывается через delete + add_list, потому что uci set не умеет списки).
     func forkopSaveSection(id: String, label: String?, enabled: Bool?, lists: [String]?) async throws {
         var cmds: [String] = []
         if let label { cmds.append("uci set forkop.\(id).label='\(label.shellQ)'") }
         if let enabled { cmds.append("uci set forkop.\(id).enabled='\(enabled ? "1" : "0")'") }
         if let lists {
-            let v = lists.map { "'\($0.shellQ)'" }.joined(separator: " ")
-            cmds.append("uci set forkop.\(id).community_lists='\(v.shellQ)'")
+            cmds.append("uci delete forkop.\(id).community_lists 2>/dev/null; true")
+            for item in lists where !item.isEmpty {
+                cmds.append("uci add_list forkop.\(id).community_lists=\(item.shellQ)")
+            }
         }
         guard !cmds.isEmpty else { return }
         cmds.append("uci commit forkop")
@@ -981,11 +1111,12 @@ struct RouterService {
     }
 
     func forkopAddSection(label: String, lists: [String]) async throws {
-        let v = lists.map { "'\($0.shellQ)'" }.joined(separator: " ")
-        _ = try await exec(
-            "NEW=$(uci add forkop section); uci set forkop.$NEW.label='\(label.shellQ)'; uci set forkop.$NEW.enabled='1'; uci set forkop.$NEW.action='connection'; uci set forkop.$NEW.community_lists='\(v.shellQ)'; uci commit forkop; echo added",
-            allowDangerous: true
-        )
+        var script = "NEW=$(uci add forkop section); uci set forkop.$NEW.label='\(label.shellQ)'; uci set forkop.$NEW.enabled='1'; uci set forkop.$NEW.action='connection'"
+        for item in lists where !item.isEmpty {
+            script += "; uci add_list forkop.$NEW.community_lists=\(item.shellQ)"
+        }
+        script += "; uci commit forkop; echo added"
+        _ = try await exec(script, allowDangerous: true)
     }
 
     /// Ссылка-подключение: anon-секции адресуются как @connection_link[N].

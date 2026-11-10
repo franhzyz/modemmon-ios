@@ -13,10 +13,27 @@ struct ForkopView: View {
     @State private var liveTask: Task<Void, Never>?
     @State private var diag: [RouterService.ForkopCheck]?
     @State private var diagBusy = false
+    @State private var dash = DashInfo()
+    @State private var prevTotals: (Int64, Int64, Date)?
+    @State private var nodeDelays: [String: Int] = [:]
+    @State private var testing = false
+    @State private var updating = false
+
+    struct DashInfo {
+        var downBps: Double = 0
+        var upBps: Double = 0
+        var downTotal: Int64 = 0
+        var upTotal: Int64 = 0
+        var active: Int = 0
+        var cpu: Double?
+        var memMB: Double?
+        var coreUp: Int?
+    }
 
     var body: some View {
         List {
             statusSection
+            dashSection
             diagSection
             trafficSection
             if !groups.isEmpty { groupsSection }
@@ -73,6 +90,74 @@ struct ForkopView: View {
                 ProgressView().frame(maxWidth: .infinity)
             }
         }
+    }
+
+    // MARK: Дашборд
+
+    private var dashSection: some View {
+        Section("Дашборд") {
+            if let d = status, d.clashAlive {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    StatTile(title: "Скорость ↓", value: Fmt.kbps(dash.downBps))
+                    StatTile(title: "Скорость ↑", value: Fmt.kbps(dash.upBps))
+                    StatTile(title: "Соединения", value: "\(dash.active)")
+                    StatTile(title: "Всего ↓", value: Fmt.bytes(dash.downTotal))
+                    StatTile(title: "Всего ↑", value: Fmt.bytes(dash.upTotal))
+                    StatTile(title: "Нагрузка", value: dash.cpu.map { String(format: "%.0f%%", $0) } ?? "—",
+                             sub: dash.memMB.map { String(format: "%.1f МБ", $0) })
+                }
+                if let up = dash.coreUp {
+                    Text("Ядро работает: \(Fmt.uptime(up))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button {
+                        Task { await testAllGroups() }
+                    } label: {
+                        HStack {
+                            if testing { ProgressView().controlSize(.small) }
+                            Text("Тест всех секций").font(.caption.weight(.semibold))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(testing)
+                    Button {
+                        Task { await updateLists() }
+                    } label: {
+                        HStack {
+                            if updating { ProgressView().controlSize(.small) }
+                            Text("Обновить списки").font(.caption.weight(.semibold))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(updating)
+                }
+            } else {
+                Text("Дашборд появится, когда sing-box запущен (Clash API :9090)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func testAllGroups() async {
+        testing = true
+        defer { testing = false }
+        for g in groups {
+            if let d = await app.run({ svc in try await svc.clashTestGroup(g.name) }) {
+                for (k, v) in d { nodeDelays[k] = v }
+            }
+        }
+        if let nd = await app.run({ svc in try await svc.clashNodeDelays() }) {
+            for (k, v) in nd { nodeDelays[k] = v }
+        }
+    }
+
+    private func updateLists() async {
+        updating = true
+        defer { updating = false }
+        await app.run { svc in try await svc.forkopStateRestart() }
     }
 
     // MARK: Диагностика
@@ -174,12 +259,16 @@ struct ForkopView: View {
                                     Button {
                                         Task { await select(group: g, node: node) }
                                     } label: {
-                                        Text(node)
-                                            .font(.caption.monospaced())
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(node == g.now ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
-                                            .clipShape(Capsule())
+                                        HStack(spacing: 4) {
+                                            Text(node).font(.caption.monospaced())
+                                            if let ms = nodeDelays[node] {
+                                                Text("\(ms)мс").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(node == g.now ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                                        .clipShape(Capsule())
                                     }
                                     .buttonStyle(.borderless)
                                 }
@@ -335,11 +424,13 @@ struct ForkopView: View {
         async let st: RouterService.ForkopStatus? = app.run { svc in try await svc.forkopStatus() }
         async let gr: [RouterService.ClashGroup]? = app.run { svc in try await svc.clashGroups() }
         async let tr: RouterService.ClashTraffic? = app.run { svc in try await svc.clashConnections() }
+        async let nd: [String: Int]? = app.run { svc in try await svc.clashNodeDelays() }
         async let cf: UciConfig? = app.run { svc in try await svc.forkopConfig() }
         async let lg: String? = app.run { svc in try await svc.forkopLog() }
         status = await st
         groups = await gr ?? []
         traffic = await tr
+        if let n = await nd { for (k, v) in n { nodeDelays[k] = v } }
         cfg = await cf
         log = await lg ?? ""
     }
@@ -348,10 +439,23 @@ struct ForkopView: View {
         liveTask?.cancel()
         liveTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 if Task.isCancelled { break }
                 if let t = await app.run({ svc in try await svc.clashConnections() }) {
-                    traffic = t
+                    if let prev = prevTotals {
+                        let dt = max(0.5, Date().timeIntervalSince(prev.2))
+                        dash.downBps = max(0, Double(t.downTotal - prev.0) / dt)
+                        dash.upBps = max(0, Double(t.upTotal - prev.1) / dt)
+                    }
+                    prevTotals = (t.downTotal, t.upTotal, Date())
+                    dash.downTotal = t.downTotal
+                    dash.upTotal = t.upTotal
+                    dash.active = t.active
+                }
+                if let cs = await app.run({ svc in try await svc.forkopCoreStats() }) {
+                    dash.cpu = cs.cpuPercent
+                    dash.memMB = cs.memMB
+                    dash.coreUp = cs.uptimeSec
                 }
             }
         }
@@ -409,9 +513,8 @@ struct ForkopSectionEditor: View {
     @State private var newLinkUri = ""
 
     static let knownLists = [
-        "chatgpt", "claude", "gemini", "openai", "github", "ai", "cloudflare",
-        "discord", "facebook", "instagram", "telegram", "tiktok", "youtube",
-        "whatsapp", "twitter", "netflix", "spotify", "steam", "rutracker",
+        "ai", "chatgpt", "claude", "cloudflare", "gemini", "github",
+        "discord", "facebook", "instagram", "telegram", "tiktok", "youtube", "whatsapp",
     ]
 
     var body: some View {

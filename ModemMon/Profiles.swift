@@ -32,6 +32,19 @@ struct MmSettings: Codable, Equatable {
     var demo: Bool = false
     var hiddenMenu: Set<String> = []
     var wolIface: String = "br-lan"
+    var keepPassword: Bool = true
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pollInterval = try c.decodeIfPresent(Double.self, forKey: .pollInterval) ?? 2.0
+        safeMode = try c.decodeIfPresent(Bool.self, forKey: .safeMode) ?? true
+        demo = try c.decodeIfPresent(Bool.self, forKey: .demo) ?? false
+        hiddenMenu = try c.decodeIfPresent(Set<String>.self, forKey: .hiddenMenu) ?? []
+        wolIface = try c.decodeIfPresent(String.self, forKey: .wolIface) ?? "br-lan"
+        keepPassword = try c.decodeIfPresent(Bool.self, forKey: .keepPassword) ?? true
+    }
 }
 
 // MARK: - Keychain (пароли профилей)

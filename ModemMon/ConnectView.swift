@@ -4,6 +4,7 @@ import SwiftUI
 struct ConnectView: View {
     @EnvironmentObject var app: AppState
     @State private var password: String = ""
+    @State private var keepPass: Bool = true
     @State private var showEditor = false
     @State private var editTarget: RouterProfile?
 
@@ -23,6 +24,15 @@ struct ConnectView: View {
                             .textContentType(.password)
                             .submitLabel(.go)
                             .onSubmit { Task { await connect() } }
+                        Toggle("Сохранять пароль на устройстве", isOn: $keepPass)
+                            .font(.subheadline)
+                            .onChange(of: keepPass) { on in
+                                app.settings.keepPassword = on
+                                if !on {
+                                    if let p = activeProfile { app.clearStoredPasswords(for: p) }
+                                    password = ""
+                                }
+                            }
                     }
                     Button {
                         Task { await connect() }
@@ -106,8 +116,9 @@ struct ConnectView: View {
             }
             .onAppear {
                 if let p = activeProfile {
-                    password = app.password(for: p)
+                    password = app.storedPassword(for: p)
                 }
+                keepPass = app.settings.keepPassword
             }
         }
     }
@@ -116,7 +127,7 @@ struct ConnectView: View {
 
     private var profileBinding: Binding<UUID?> {
         Binding(get: { app.activeId ?? app.profiles.first?.id },
-                set: { app.activeId = $0; if let p = app.active { password = app.password(for: p) } })
+                set: { app.activeId = $0; if let p = app.active { password = app.storedPassword(for: p) } })
     }
 
     private func connect() async {
