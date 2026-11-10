@@ -910,6 +910,104 @@ struct RouterService {
         t.active = j.list("connections").count
         return t
     }
+
+    // MARK: Forkop: диагностика
+
+    struct ForkopCheck: Identifiable {
+        let id = UUID()
+        var name: String
+        var ok: Bool
+        var detail: String
+    }
+
+    func forkopDiagnostics() async throws -> [ForkopCheck] {
+        var res: [ForkopCheck] = []
+
+        let svc = try await execText("/etc/init.d/forkop status 2>&1")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        res.append(ForkopCheck(name: "Сервис forkop", ok: svc.contains("running"), detail: svc))
+
+        let chk = try await execText("sing-box check -c /etc/sing-box/config.json 2>&1; echo EXIT=$?")
+        let chkOK = chk.contains("EXIT=0") && !chk.lowercased().contains("error")
+        res.append(ForkopCheck(name: "Конфиг sing-box", ok: chkOK, detail: chkOK ? "валиден" : String(chk.prefix(220))))
+
+        var clashOK = false
+        var clashV = ""
+        if let j = try? await clashGet("/version") {
+            clashOK = true
+            clashV = j.string("version") ?? ""
+        }
+        res.append(ForkopCheck(name: "Clash API (:9090)", ok: clashOK, detail: clashOK ? clashV : "недоступен"))
+
+        let ports = try await execText("netstat -tln 2>/dev/null | grep -E ':9090|:2080|:53 ' | awk '{print $4}'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        res.append(ForkopCheck(name: "Порты 9090 / 2080 / 53", ok: !ports.isEmpty,
+                               detail: ports.isEmpty ? "не слушаются" : ports.replacingOccurrences(of: "\n", with: " · ")))
+
+        let dns = try await execText("nslookup google.com 127.0.0.42 2>&1 | tail -2")
+        let dnsOK = dns.lowercased().contains("address")
+        res.append(ForkopCheck(name: "DNS sing-box (127.0.0.42)", ok: dnsOK, detail: dnsOK ? "отвечает" : String(dns.prefix(160))))
+
+        let px = try await execText("curl -s -o /dev/null -w '%{http_code} %{time_total}' -x http://127.0.0.1:2080 --max-time 8 https://www.gstatic.com/generate_204 2>&1")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        res.append(ForkopCheck(name: "Прокси-цепочка (:2080 → gstatic)", ok: px.hasPrefix("204"),
+                               detail: px.hasPrefix("204") ? "204 OK — цепочка работает" : "не прошёл: \(px)"))
+
+        let errs = try await execText("logread | grep -iE 'forkop|sing-box' | grep -iE 'error|fail' | tail -3")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        res.append(ForkopCheck(name: "Свежие ошибки в логе", ok: errs.isEmpty, detail: errs.isEmpty ? "нет" : errs))
+
+        return res
+    }
+
+    // MARK: Forkop: управление секциями и ссылками
+
+    /// Сохранить поля секции (nil = не менять). lists — точный состав community_lists.
+    func forkopSaveSection(id: String, label: String?, enabled: Bool?, lists: [String]?) async throws {
+        var cmds: [String] = []
+        if let label { cmds.append("uci set forkop.\(id).label='\(label.shellQ)'") }
+        if let enabled { cmds.append("uci set forkop.\(id).enabled='\(enabled ? "1" : "0")'") }
+        if let lists {
+            let v = lists.map { "'\($0.shellQ)'" }.joined(separator: " ")
+            cmds.append("uci set forkop.\(id).community_lists='\(v.shellQ)'")
+        }
+        guard !cmds.isEmpty else { return }
+        cmds.append("uci commit forkop")
+        _ = try await exec(cmds.joined(separator: "; "), allowDangerous: true)
+    }
+
+    func forkopDeleteSection(id: String) async throws {
+        _ = try await exec("uci delete forkop.\(id.shellQ); uci commit forkop; echo deleted", allowDangerous: true)
+    }
+
+    func forkopAddSection(label: String, lists: [String]) async throws {
+        let v = lists.map { "'\($0.shellQ)'" }.joined(separator: " ")
+        _ = try await exec(
+            "NEW=$(uci add forkop section); uci set forkop.$NEW.label='\(label.shellQ)'; uci set forkop.$NEW.enabled='1'; uci set forkop.$NEW.action='connection'; uci set forkop.$NEW.community_lists='\(v.shellQ)'; uci commit forkop; echo added",
+            allowDangerous: true
+        )
+    }
+
+    /// Ссылка-подключение: anon-секции адресуются как @connection_link[N].
+    func forkopSaveLink(id: String, name: String?, uri: String?) async throws {
+        var cmds: [String] = []
+        if let name { cmds.append("uci set forkop.\(id).name='\(name.shellQ)'") }
+        if let uri { cmds.append("uci set forkop.\(id).uri='\(uri.shellQ)'") }
+        guard !cmds.isEmpty else { return }
+        cmds.append("uci commit forkop")
+        _ = try await exec(cmds.joined(separator: "; "), allowDangerous: true)
+    }
+
+    func forkopDeleteLink(id: String) async throws {
+        _ = try await exec("uci delete forkop.\(id.shellQ); uci commit forkop; echo deleted", allowDangerous: true)
+    }
+
+    func forkopAddLink(section: String, name: String, uri: String) async throws {
+        _ = try await exec(
+            "NEW=$(uci add forkop connection_link); uci set forkop.$NEW.section='\(section.shellQ)'; uci set forkop.$NEW.name='\(name.shellQ)'; uci set forkop.$NEW.uri='\(uri.shellQ)'; uci set forkop.$NEW.order='0'; uci commit forkop; echo added",
+            allowDangerous: true
+        )
+    }
 }
 
 // MARK: - UciSection helpers

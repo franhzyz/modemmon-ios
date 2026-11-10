@@ -11,10 +11,13 @@ struct ForkopView: View {
     @State private var log: String = ""
     @State private var switching: String?
     @State private var liveTask: Task<Void, Never>?
+    @State private var diag: [RouterService.ForkopCheck]?
+    @State private var diagBusy = false
 
     var body: some View {
         List {
             statusSection
+            diagSection
             trafficSection
             if !groups.isEmpty { groupsSection }
             if let c = cfg {
@@ -70,6 +73,52 @@ struct ForkopView: View {
                 ProgressView().frame(maxWidth: .infinity)
             }
         }
+    }
+
+    // MARK: Диагностика
+
+    private var diagSection: some View {
+        Section {
+            Button {
+                Task { await runDiagnostics() }
+            } label: {
+                HStack {
+                    Spacer()
+                    if diagBusy { ProgressView().padding(.trailing, 8) }
+                    Label("Диагностика", systemImage: "stethoscope")
+                    Spacer()
+                }
+            }
+            .disabled(diagBusy)
+            if let d = diag {
+                ForEach(d) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Image(systemName: c.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(c.ok ? Color.green : .red)
+                            Text(c.name).font(.subheadline)
+                            Spacer()
+                        }
+                        if !c.ok || c.detail.count < 80 {
+                            Text(c.detail)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            } else {
+                Text("Проверит сервис, конфиг sing-box, Clash API, порты, DNS, прокси-цепочку и свежие ошибки")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func runDiagnostics() async {
+        diagBusy = true
+        defer { diagBusy = false }
+        diag = await app.run { svc in try await svc.forkopDiagnostics() }
     }
 
     @ViewBuilder
@@ -146,26 +195,47 @@ struct ForkopView: View {
     // MARK: Правила
 
     private func sectionsCard(_ c: UciConfig) -> some View {
-        Section("Правила (секции)") {
-            ForEach(c.sections.filter { $0.type == "section" }) { s in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(s.option("label") ?? s.name).font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { (s.option("enabled") ?? "0") == "1" },
-                            set: { on in Task { await toggle(s.name, on) } }
-                        ))
-                        .labelsHidden()
+        let secs = c.sections.filter { $0.type == "section" }
+        return Section("Правила (секции)") {
+            ForEach(secs) { s in
+                NavigationLink {
+                    ForkopSectionEditor(section: s, links: c.sections.filter {
+                        $0.type == "connection_link" && $0.option("section") == s.name
+                    }) {
+                        Task { await loadAll() }
                     }
-                    let lists = s.option("community_lists") ?? ""
-                    if !lists.isEmpty {
-                        Text(lists.replacingOccurrences(of: "'", with: ""))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(s.option("label") ?? s.name).font(.subheadline.weight(.semibold))
+                            Spacer()
+                            MmBadge(text: (s.option("enabled") ?? "0") == "1" ? "on" : "off",
+                                    tone: (s.option("enabled") ?? "0") == "1" ? .ok : .neutral)
+                        }
+                        let lists = (s.option("community_lists") ?? "").replacingOccurrences(of: "'", with: "")
+                        if !lists.isEmpty {
+                            Text(lists).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
+            Button {
+                Task { await addSection() }
+            } label: {
+                Label("Добавить секцию", systemImage: "plus")
+            }
+        }
+    }
+
+    private func addSection() async {
+        await app.run { svc in try await svc.forkopAddSection(label: "Новая секция", lists: []) }
+        await loadAll()
+    }
+
+    private func toggle(_ id: String, _ on: Bool) async {
+        await app.run { svc in try await svc.forkopSet(id, "enabled", on ? "1" : "0") }
+        if let c = await app.run({ svc in try await svc.forkopConfig() }) {
+            cfg = c
         }
     }
 
@@ -322,5 +392,195 @@ struct ForkopView: View {
         guard let slash = rest.firstIndex(of: "/") else { return u }
         let host = rest[..<slash]
         return String(host) + "/••••••••"
+    }
+}
+
+// MARK: - Редактор секции forkop
+
+struct ForkopSectionEditor: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    let section: UciSection
+    let links: [UciSection]
+    var reload: () -> Void
+
+    @State private var label: String = ""
+    @State private var enabled = true
+    @State private var lists: Set<String> = []
+    @State private var customList = ""
+    @State private var busy = false
+    @State private var confirmDelete = false
+    @State private var showAddLink = false
+    @State private var newLinkName = ""
+    @State private var newLinkUri = ""
+
+    static let knownLists = [
+        "chatgpt", "claude", "gemini", "openai", "github", "ai", "cloudflare",
+        "discord", "facebook", "instagram", "telegram", "tiktok", "youtube",
+        "whatsapp", "twitter", "netflix", "spotify", "steam", "rutracker",
+    ]
+
+    var body: some View {
+        Form {
+            Section("Основное") {
+                TextField("Название", text: $label)
+                Toggle("Включена", isOn: $enabled)
+                LabeledContent("Тип", value: section.option("action") ?? "connection")
+            }
+
+            Section {
+                ForEach(Self.knownLists, id: \.self) { l in
+                    Button {
+                        if lists.contains(l) { lists.remove(l) } else { lists.insert(l) }
+                    } label: {
+                        HStack {
+                            Text(l).font(.system(.subheadline, design: .monospaced)).foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: lists.contains(l) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(lists.contains(l) ? Color.accentColor : .secondary)
+                        }
+                    }
+                }
+                HStack {
+                    TextField("свой список…", text: $customList)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Добавить") {
+                        let v = customList.trimmingCharacters(in: .whitespaces)
+                        if !v.isEmpty { lists.insert(v); customList = "" }
+                    }
+                    .disabled(customList.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: {
+                Text("Списки (community_lists): \(lists.count)")
+            } footer: {
+                Text("Отмеченные списки будут применены. Галочку можно снять — список уйдёт из секции.")
+            }
+
+            Section("Ссылки-подключения (\(links.count))") {
+                ForEach(links) { l in
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("имя", text: Binding(
+                            get: { linkDraftName[l.id] ?? (l.option("name") ?? "") },
+                            set: { linkDraftName[l.id] = $0 }
+                        ))
+                        .font(.subheadline.weight(.medium))
+                        TextField("vless://…", text: Binding(
+                            get: { linkDraftUri[l.id] ?? (l.option("uri") ?? "") },
+                            set: { linkDraftUri[l.id] = $0 }
+                        ))
+                        .font(.caption.monospaced())
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        HStack {
+                            Button("Сохранить") {
+                                Task {
+                                    await saveLink(l)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                            Spacer()
+                            Button(role: .destructive) {
+                                Task {
+                                    await app.run { svc in try await svc.forkopDeleteLink(id: l.name) }
+                                    reload()
+                                    dismiss()
+                                }
+                            } label: {
+                                Label("Удалить ссылку", systemImage: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                Button {
+                    showAddLink = true
+                } label: {
+                    Label("Добавить ссылку", systemImage: "plus")
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if busy { ProgressView().padding(.trailing, 8) }
+                        Text("Сохранить и применить").bold()
+                        Spacer()
+                    }
+                }
+                .disabled(busy || label.isEmpty)
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    HStack { Spacer(); Text("Удалить секцию"); Spacer() }
+                }
+            } footer: {
+                Text("«Сохранить и применить» записывает конфиг и перезапускает forkop — правила подхватятся автоматически.")
+            }
+        }
+        .navigationTitle(section.option("label") ?? section.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            label = section.option("label") ?? ""
+            enabled = (section.option("enabled") ?? "0") == "1"
+            let raw = (section.option("community_lists") ?? "").replacingOccurrences(of: "'", with: "")
+            lists = Set(raw.split(separator: " ").map(String.init).filter { !$0.isEmpty })
+        }
+        .alert("Удалить секцию \(section.option("label") ?? section.name)?", isPresented: $confirmDelete) {
+            Button("Удалить", role: .destructive) {
+                Task {
+                    await app.run { svc in try await svc.forkopDeleteSection(id: section.name) }
+                    reload()
+                    dismiss()
+                }
+            }
+            Button("Отмена", role: .cancel) { }
+        }
+        .alert("Новая ссылка-подключение", isPresented: $showAddLink) {
+            TextField("Имя", text: $newLinkName)
+            TextField("vless://…", text: $newLinkUri)
+            Button("Добавить") {
+                Task {
+                    await app.run { svc in try await svc.forkopAddLink(section: section.name, name: newLinkName, uri: newLinkUri) }
+                    newLinkName = ""; newLinkUri = ""
+                    reload()
+                }
+            }
+            Button("Отмена", role: .cancel) { }
+        } message: {
+            Text("URI целиком: vless://…#имя")
+        }
+    }
+
+    @State private var linkDraftName: [String: String] = [:]
+    @State private var linkDraftUri: [String: String] = [:]
+
+    private func save() async {
+        busy = true
+        defer { busy = false }
+        await app.run { svc in
+            try await svc.forkopSaveSection(id: section.name,
+                                            label: label,
+                                            enabled: enabled,
+                                            lists: lists.sorted())
+        }
+        // применяем: рестарт подхватит новые правила
+        await app.run { svc in try await svc.forkopAction(.restart) }
+        reload()
+        dismiss()
+    }
+
+    private func saveLink(_ l: UciSection) async {
+        let n = linkDraftName[l.id] ?? (l.option("name") ?? "")
+        let u = linkDraftUri[l.id] ?? (l.option("uri") ?? "")
+        await app.run { svc in try await svc.forkopSaveLink(id: l.name, name: n.isEmpty ? nil : n, uri: u.isEmpty ? nil : u) }
+        reload()
     }
 }
