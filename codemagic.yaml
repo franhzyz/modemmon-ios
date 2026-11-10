@@ -1,6 +1,6 @@
 # Codemagic: сборка ModemMon iOS без Mac.
 #
-# В репозитории проект лежит во вложенной папке ModemMon-iOS/ — пути ниже учитывают это.
+# Проект лежит в корне репозитория.
 #
 # ios-unsigned — соберёт ModemMon-unsigned.zip (Payload-формат, ставится через AltStore/SideStore).
 # ios-signed   — подписанная .ipa: в Codemagic подключи Apple Developer Portal (Teams →
@@ -18,7 +18,7 @@ workflows:
       - name: Build (no codesign)
         script: |
           set -e
-          cd $CM_BUILD_DIR/ModemMon-iOS
+          cd $CM_BUILD_DIR
           xcodebuild -project ModemMon.xcodeproj \
             -target ModemMon \
             -configuration Release \
@@ -29,10 +29,10 @@ workflows:
       - name: Package zip (с иконкой)
         script: |
           set -e
-          cd $CM_BUILD_DIR/ModemMon-iOS/build/Release-iphoneos
+          cd $CM_BUILD_DIR/build/Release-iphoneos
           # иконки в бандл + регистрация в Info.plist (фаза ресурсов иногда не копирует их сама)
-          cp $CM_BUILD_DIR/ModemMon-iOS/ModemMon/AppIcon@2x.png ModemMon.app/ 2>/dev/null || true
-          cp $CM_BUILD_DIR/ModemMon-iOS/ModemMon/AppIcon@3x.png ModemMon.app/ 2>/dev/null || true
+          cp $CM_BUILD_DIR/ModemMon/AppIcon@2x.png ModemMon.app/ 2>/dev/null || true
+          cp $CM_BUILD_DIR/ModemMon/AppIcon@3x.png ModemMon.app/ 2>/dev/null || true
           PLIST=ModemMon.app/Info.plist
           /usr/libexec/PlistBuddy -c "Add :CFBundleIcons dict" $PLIST 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon dict" $PLIST 2>/dev/null || true
@@ -56,9 +56,9 @@ workflows:
       - name: Build and sign ipa
         script: |
           set -e
-          cd $CM_BUILD_DIR/ModemMon-iOS
+          cd $CM_BUILD_DIR
           xcode-project build-ipa \
             --project ModemMon.xcodeproj \
             --config Release
     artifacts:
-      - ModemMon-iOS/build/ios/ipa/*.ipa
+      - build/ios/ipa/*.ipa
