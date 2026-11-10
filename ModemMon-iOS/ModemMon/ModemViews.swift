@@ -222,94 +222,117 @@ struct BandsView: View {
     @State private var supported: [String] = []
     @State private var allowed: [String] = []
     @State private var selected: Set<String> = []
-    @State private var loaded = false
+    @State private var backend: RouterService.BandsBackend?
     @State private var busy = false
+    @State private var error: String?
 
     var body: some View {
         List {
-            Section {
+            Section("Сейчас разрешены (allowed)") {
                 Text(allowed.isEmpty ? "—" : allowed.joined(separator: ", "))
                     .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.secondary)
-            } header: {
-                Text("Сейчас разрешены (allowed)")
             }
-
             Section {
-                if supported.isEmpty {
+                if busy && supported.isEmpty {
                     ProgressView().frame(maxWidth: .infinity)
+                } else if let error, supported.isEmpty {
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Повторить") { Task { await load() } }
+                } else if supported.isEmpty {
+                    Text("Нет данных о поддерживаемых бэндах")
+                    Button("Обновить") { Task { await load() } }
                 }
                 ForEach(supported, id: \.self) { b in
                     Button {
                         if selected.contains(b) { selected.remove(b) } else { selected.insert(b) }
                     } label: {
                         HStack {
-                            Text(b)
-                                .font(.system(.body, design: .monospaced).weight(.medium))
-                                .foregroundStyle(.primary)
+                            Text(b).font(.system(.body, design: .monospaced).weight(.medium)).foregroundStyle(.primary)
                             Spacer()
                             Image(systemName: selected.contains(b) ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(selected.contains(b) ? Color.accentColor : .secondary)
                         }
-                    }
+                    }.disabled(busy)
                 }
             } header: {
-                Text("Лок бэндов (выбери разрешённые)")
+                Text("Лок бэндов (выберите разрешённые)")
             } footer: {
-                Text("Пустой выбор = все бэнды. Применение заставит модем перерегистрироваться в сети — связь пропадёт на несколько секунд.")
+                Text("Пустой выбор = все поддерживаемые бэнды. При применении связь может временно пропасть.")
             }
-
             Section {
-                Button {
-                    Task { await apply() }
-                } label: {
+                Button { Task { await apply() } } label: {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
                         Text("Применить (\(selected.count))").bold()
                         Spacer()
                     }
-                }
-                .disabled(busy)
+                }.disabled(busy || supported.isEmpty)
                 Button("Разрешить все (сбросить лок)") { selected = Set(supported) }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondary).disabled(busy || supported.isEmpty)
             }
         }
         .navigationTitle("Бэнды")
-        .onAppear {
-            if !loaded {
-                loaded = true
-                Task { await load() }
-            }
-        }
+        .task { await load() }
+        .refreshable { await load() }
     }
 
     private func load() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        error = nil
         if app.conn == .demo {
             supported = ["B1", "B3", "B7", "B20", "n78"]
             allowed = ["B3", "n78"]
             selected = Set(allowed)
             return
         }
-        if let info = await app.run({ svc in try await svc.bandsInfo() }) {
-            supported = info.supported
-            allowed = info.allowed
-            selected = Set(info.allowed)
+        guard let info = await app.run({ svc in try await svc.bandsInfo() }) else {
+            error = "Не удалось загрузить бэнды. Проверьте подключение и повторите."
+            return
+        }
+        install(info)
+    }
+
+    private func install(_ info: RouterService.BandsInfo) {
+        supported = info.supported
+        allowed = info.allowed
+        backend = info.backend
+        let current = Set(info.allowed.map(BandsCodec.mmName))
+        if current.contains("any") {
+            selected = Set(info.supported)
+        } else {
+            selected = Set(info.supported.filter { current.contains(BandsCodec.mmName($0)) })
         }
     }
 
     private func apply() async {
+        guard !busy, !supported.isEmpty else { return }
+        if app.conn == .demo {
+            allowed = selected.isEmpty ? supported : supported.filter { selected.contains($0) }
+            selected = Set(allowed)
+            return
+        }
+        guard let backend else { return }
         busy = true
         defer { busy = false }
-        guard app.conn != .demo else { return }
-        do {
-            try await app.service?.applyBands(Array(selected).sorted())
-            if let info = await app.run({ svc in try await svc.bandsInfo() }) {
-                allowed = info.allowed
-                supported = info.supported
+        let chosen = supported.filter { selected.contains($0) }
+        let all = supported
+        guard let _: Void = await app.run({ svc in
+            try await svc.applyBands(chosen, supported: all, backend: backend)
+        }) else { return }
+        if let info = await app.run({ svc in try await svc.bandsInfo() }) {
+            install(info)
+            let expected = Set((chosen.isEmpty ? all : chosen).map(BandsCodec.mmName))
+            let actual = Set(info.allowed.map(BandsCodec.mmName))
+            let matches = actual == expected || (actual.contains("any") && expected == Set(all.map(BandsCodec.mmName)))
+            if !matches {
+                app.banner = "Команда отправлена, но полученный список бэндов не совпадает с выбранным. Проверьте настройки модема."
             }
-        } catch {
-            app.banner = "Бэнды: \(error.localizedDescription)"
+        } else {
+            app.banner = "Команда отправлена, но не удалось проверить бэнды. Обновите список."
         }
     }
 }
