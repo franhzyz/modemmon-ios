@@ -888,7 +888,7 @@ struct RouterService {
         let groupTypes = ["Selector", "URLTest", "Fallback", "LoadBalance"]
         var res: [ClashGroup] = []
         for (name, v) in j.dict {
-            guard let g = J(v) else { continue }
+            let g = J(v)
             let type = g.string("type") ?? ""
             guard groupTypes.contains(type), g.string("now") != nil else { continue }
             res.append(ClashGroup(name: name, type: type, now: g.string("now") ?? "", all: g.stringsSafe("all")))
