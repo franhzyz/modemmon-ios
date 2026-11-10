@@ -232,13 +232,6 @@ struct ForkopView: View {
         await loadAll()
     }
 
-    private func toggle(_ id: String, _ on: Bool) async {
-        await app.run { svc in try await svc.forkopSet(id, "enabled", on ? "1" : "0") }
-        if let c = await app.run({ svc in try await svc.forkopConfig() }) {
-            cfg = c
-        }
-    }
-
     // MARK: Серверы
 
     private func serversCard(_ c: UciConfig) -> some View {
@@ -461,18 +454,12 @@ struct ForkopSectionEditor: View {
             Section("Ссылки-подключения (\(links.count))") {
                 ForEach(links) { l in
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField("имя", text: Binding(
-                            get: { linkDraftName[l.id] ?? (l.option("name") ?? "") },
-                            set: { linkDraftName[l.id] = $0 }
-                        ))
-                        .font(.subheadline.weight(.medium))
-                        TextField("vless://…", text: Binding(
-                            get: { linkDraftUri[l.id] ?? (l.option("uri") ?? "") },
-                            set: { linkDraftUri[l.id] = $0 }
-                        ))
-                        .font(.caption.monospaced())
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        TextField("имя", text: linkNameBinding(l))
+                            .font(.subheadline.weight(.medium))
+                        TextField("vless://…", text: linkUriBinding(l))
+                            .font(.caption.monospaced())
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
                         HStack {
                             Button("Сохранить") {
                                 Task {
@@ -562,6 +549,16 @@ struct ForkopSectionEditor: View {
     @State private var linkDraftName: [String: String] = [:]
     @State private var linkDraftUri: [String: String] = [:]
 
+    private func linkNameBinding(_ l: UciSection) -> Binding<String> {
+        Binding(get: { linkDraftName[l.name] ?? (l.option("name") ?? "") },
+                set: { linkDraftName[l.name] = $0 })
+    }
+
+    private func linkUriBinding(_ l: UciSection) -> Binding<String> {
+        Binding(get: { linkDraftUri[l.name] ?? (l.option("uri") ?? "") },
+                set: { linkDraftUri[l.name] = $0 })
+    }
+
     private func save() async {
         busy = true
         defer { busy = false }
@@ -578,8 +575,8 @@ struct ForkopSectionEditor: View {
     }
 
     private func saveLink(_ l: UciSection) async {
-        let n = linkDraftName[l.id] ?? (l.option("name") ?? "")
-        let u = linkDraftUri[l.id] ?? (l.option("uri") ?? "")
+        let n = linkDraftName[l.name] ?? (l.option("name") ?? "")
+        let u = linkDraftUri[l.name] ?? (l.option("uri") ?? "")
         await app.run { svc in try await svc.forkopSaveLink(id: l.name, name: n.isEmpty ? nil : n, uri: u.isEmpty ? nil : u) }
         reload()
     }
