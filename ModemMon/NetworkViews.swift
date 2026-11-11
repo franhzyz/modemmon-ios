@@ -178,8 +178,16 @@ struct IfaceEditView: View {
     let iface: Iface
     var saved: () -> Void
     @State private var cfg: UciConfig?
+    @State private var secId: String?
     @State private var metricDraft: String = ""
     @State private var busy = false
+    @State private var addOption = false
+    @State private var newOptName = ""
+    @State private var newOptValue = ""
+    @State private var editing: UciOption?
+    @State private var editValue = ""
+    @State private var confirmIf = false
+    @State private var ifAction: String = "ifup"
 
     var body: some View {
         Form {
@@ -189,13 +197,52 @@ struct IfaceEditView: View {
                 KVRow(key: "Шлюз", value: iface.gateway)
                 KVRow(key: "DNS", value: iface.dns.joined(separator: ", "))
             }
-            if let c = cfg, let sec = c.sections.first(where: { $0.name == iface.name }) {
-                Section("UCI: network.\(iface.name)") {
-                    ForEach(sec.options) { o in
-                        UciOptionEditor(config: "network", section: sec.name, option: o) { Task { await load() } }
+
+            if secId == nil, let c = cfg {
+                Section("Секция UCI не найдена по имени — выбери вручную") {
+                    ForEach(c.sections.filter { $0.type == "interface" }) { s in
+                        Button {
+                            secId = s.name
+                        } label: {
+                            Text("\(s.name) · proto \(s.option("proto") ?? "?")")
+                        }
                     }
                 }
             }
+
+            if let secId, let c = cfg, let sec = c.sections.first(where: { $0.name == secId }) {
+                Section("Опции UCI: network.\(sec.anon ? sec.name : secId)") {
+                    ForEach(sec.options) { o in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(o.name).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    editValue = o.value
+                                    editing = o
+                                } label: { Image(systemName: "pencil.circle") }
+                                    .buttonStyle(.borderless)
+                                Button(role: .destructive) {
+                                    Task { await deleteOption(o.name) }
+                                } label: { Image(systemName: "trash").font(.caption) }
+                                    .buttonStyle(.borderless)
+                            }
+                            Text(o.value)
+                                .font(.system(.caption, design: .monospaced))
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    Button {
+                        addOption = true
+                    } label: {
+                        Label("Добавить опцию", systemImage: "plus")
+                    }
+                } footer: {
+                    Text("Пиры и тонкие настройки туннелей — в «Конфиг UCI → network». Каждое изменение сразу пишется в uci (commit).")
+                }
+            }
+
             Section {
                 TextField("metric", text: $metricDraft)
                     .keyboardType(.numberPad)
@@ -210,6 +257,13 @@ struct IfaceEditView: View {
             } footer: {
                 Text("Чем меньше metric, тем приоритетнее интерфейс. У wwan обычно 10, у резервного канала выше.")
             }
+
+            Section("Перезапуск") {
+                HStack {
+                    Button("ifup") { ifAction = "ifup"; confirmIf = true }
+                    Button("ifdown") { ifAction = "ifdown"; confirmIf = true }
+                }
+            }
         }
         .navigationTitle("if: \(iface.name)")
         .navigationBarTitleDisplayMode(.inline)
@@ -217,14 +271,77 @@ struct IfaceEditView: View {
             if cfg == nil { Task { await load() } }
             metricDraft = iface.metric.map(String.init) ?? ""
         }
+        .alert("Новая опция", isPresented: $addOption) {
+            TextField("имя (например mtu)", text: $newOptName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField("значение", text: $newOptValue)
+            Button("Добавить") {
+                Task { await saveOption(newOptName, newOptValue) }
+                newOptName = ""; newOptValue = ""
+            }
+            Button("Отмена", role: .cancel) { }
+        }
+        .alert("Изменить \(editing?.name ?? "")", isPresented: Binding(
+            get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            TextField("значение", text: $editValue)
+                .textInputAutocapitalization(.never)
+            Button("Сохранить") {
+                if let o = editing { Task { await saveOption(o.name, editValue) } }
+                editing = nil
+            }
+            Button("Отмена", role: .cancel) { editing = nil }
+        }
+        .alert("\(ifAction) \(iface.name)?", isPresented: $confirmIf) {
+            Button(ifAction, role: ifAction == "ifdown" ? .destructive : .none) {
+                Task {
+                    await app.run { svc in try await svc.exec("if\(ifAction == "ifup" ? "up" : "down") \(iface.name) 2>&1; echo done") }
+                }
+            }
+            Button("Отмена", role: .cancel) { }
+        }
+    }
+
+    private func findSecId(_ c: UciConfig) -> String? {
+        if let s = c.sections.first(where: { $0.type == "interface" && $0.name == iface.name }) { return s.name }
+        for s in c.sections where s.type == "interface" && s.anon {
+            if s.option("device") == iface.device || s.option("ifname") == iface.device { return s.name }
+        }
+        return nil
     }
 
     private func load() async {
         if app.conn == .demo {
             cfg = DemoSource.uciNetwork()
+            secId = "lan"
             return
         }
-        cfg = await app.run { svc in try await svc.uciShow("network") }
+        let c = await app.run { svc in try await svc.uciShow("network") }
+        cfg = c
+        if let c { secId = findSecId(c) }
+    }
+
+    private func saveOption(_ name: String, _ value: String) async {
+        guard let secId else { return }
+        busy = true
+        defer { busy = false }
+        await app.run { svc in try await svc.uciSet("network", secId, name, value) }
+        await reload()
+    }
+
+    private func deleteOption(_ name: String) async {
+        guard let secId else { return }
+        await app.run { svc in
+            try await svc.exec("uci delete network.\(secId.shellQ).\(name.shellQ) 2>/dev/null; uci commit network; echo done", allowDangerous: true)
+        }
+        await reload()
+    }
+
+    private func reload() async {
+        let c = await app.run { svc in try await svc.uciShow("network") }
+        cfg = c
+        if let c { secId = findSecId(c) ?? secId }
+        saved()
     }
 
     private func saveMetric() async {

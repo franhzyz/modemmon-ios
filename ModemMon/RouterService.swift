@@ -90,28 +90,34 @@ struct RouterService {
     }
 
     private func parseMmSms(_ id: Int, _ dump: String) -> Sms {
-        var number = "", state = "received", ts: Date?
+        var number = "", state = "", pduType = "", ts: Date?
         var textLines: [String] = []
         var collecting = false
+        let stopKeys = ["pdu type:", "state:", "storage:", "smsc:", "timestamp:", "delivery report:", "class:"]
         for raw in dump.split(separator: "\n") {
             guard raw.contains("|") else { continue }
-            let seg = raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).last.map(String.init) ?? ""
-            let t = seg.trimmingCharacters(in: .whitespaces)
-            if collecting {
-                if t.hasPrefix("pdu type:") || t.hasPrefix("state:") || t.hasPrefix("storage:") || t.hasPrefix("smsc:") || t.hasPrefix("timestamp:") {
-                    collecting = false
-                } else {
-                    textLines.append(t)
-                    continue
+            // строка может содержать несколько полей через '|'
+            let parts = raw.split(separator: "|", omittingEmptySubsequences: false).dropFirst()
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            for part in parts {
+                if collecting {
+                    if stopKeys.contains(where: { part.hasPrefix($0) }) {
+                        collecting = false
+                    } else {
+                        textLines.append(part)
+                        continue
+                    }
                 }
+                if part.hasPrefix("number:") { number = String(part.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+                if part.hasPrefix("text:") { collecting = true; textLines.append(String(part.dropFirst(5)).trimmingCharacters(in: .whitespaces)) }
+                if part.hasPrefix("state:") { state = String(part.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
+                if part.hasPrefix("pdu type:") { pduType = String(part.dropFirst(9)).trimmingCharacters(in: .whitespaces) }
+                if part.hasPrefix("timestamp:") { ts = parseMmDate(String(part.dropFirst(10)).trimmingCharacters(in: .whitespaces)) }
             }
-            if t.hasPrefix("number:") { number = String(t.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
-            if t.hasPrefix("text:") { collecting = true; textLines.append(String(t.dropFirst(5)).trimmingCharacters(in: .whitespaces)) }
-            if t.hasPrefix("state:") { state = String(t.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
-            if t.hasPrefix("timestamp:") { ts = parseMmDate(String(t.dropFirst(10)).trimmingCharacters(in: .whitespaces)) }
         }
         let text = textLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return Sms(id: String(id), number: number, text: text.isEmpty ? "(без текста)" : text, ts: ts, isNew: state == "received")
+        let received = pduType == "deliver" || state == "received"
+        return Sms(id: String(id), number: number, text: text.isEmpty ? "(без текста)" : text, ts: ts, isNew: received)
     }
 
     private func parseMmDate(_ s: String) -> Date? {
@@ -175,7 +181,88 @@ struct RouterService {
         let id = String(created.stdout[range.upperBound...].prefix(while: { $0.isNumber }))
         guard !id.isEmpty else { throw MmError.backend("ModemManager вернул некорректный ID SMS") }
         let sent = try await exec("mmcli -s \(id) --send 2>&1", timeout: 70)
-        guard sent.ok else { throw MmError.backend("SMS не отправлена: \(sent.stdout.prefix(250))") }
+        let sendOk = sent.ok && !sent.stdout.lowercased().contains("error")
+        if !sendOk {
+            // QMI-прошивки (Dell DW5821e) иногда отказываются слать (error 54) —
+            // чистим застрявшее сообщение и уходим на AT-порт
+            _ = try? await exec("mmcli -m any --messaging-delete-sms=/org/freedesktop/ModemManager1/SMS/\(id) 2>&1")
+            try await smsSendViaAt(number: number, text: text)
+        }
+    }
+
+    /// Резервная отправка: PDU-режим через AT-порт (кириллица = UCS2, длинные — склейка).
+    private func smsSendViaAt(number: String, text: String) async throws {
+        let port = try await findAtPort()
+
+        let ref = UInt8.random(in: 0...255)
+        let maxChars = 67
+        var chars = Array(text)
+        var parts: [[Character]] = []
+        if chars.isEmpty { parts = [[]] }
+        while !chars.isEmpty {
+            let n = min(maxChars, chars.count)
+            parts.append(Array(chars[..<n]))
+            chars.removeFirst(n)
+        }
+
+        var lastError = "нет ответа"
+        for (idx, part) in parts.enumerated() {
+            let pdu = buildSmsSubmitPdu(number: number,
+                                        ucs2Text: String(part),
+                                        ref: ref,
+                                        part: idx + 1,
+                                        total: parts.count)
+            let script = "P=/dev/\(port); stty -F $P 115200 raw -echo 2>/dev/null; " +
+                "(sleep 1; printf 'AT+CMGF=0\\r' > $P; sleep 1; printf 'AT+CMGS=\(pdu.len)\\r' > $P; sleep 2; printf '\(pdu.hex)\\032' > $P) & " +
+                "timeout 18 cat $P 2>/dev/null | tr -d '\\r'"
+            let out = try await execText(script)
+            if out.contains("+CMGS:") { continue } // часть ушла
+            if let r = out.range(of: "+CMS ERROR:") {
+                lastError = String(String(out[r.lowerBound...]).prefix(140))
+            } else {
+                lastError = String(out.prefix(140))
+            }
+            throw MmError.backend("SMS не отправлена (AT): \(lastError)")
+        }
+    }
+
+    /// SMS-SUBMIT PDU (UCS2, поддержка склейки длинных).
+    private func buildSmsSubmitPdu(number: String, ucs2Text: String, ref: UInt8, part: Int, total: Int) -> (hex: String, len: Int) {
+        let international = number.hasPrefix("+")
+        var digits = international ? String(number.dropFirst()) : number
+        digits = digits.filter { $0.isNumber }
+        if digits.count % 2 == 1 { digits += "F" }
+        var addr = ""
+        let cs = Array(digits)
+        var i = 0
+        while i < cs.count {
+            let a = cs[i]
+            let b = i + 1 < cs.count ? cs[i + 1] : "F"
+            addr += String(b) + String(a)
+            i += 2
+        }
+        let addrLen = cs.count
+        let typeByte = international ? "91" : "81"
+
+        var payload = ucs2Text.data(using: .utf16BigEndian)!.map { String(format: "%02X", $0) }.joined()
+        if total > 1 {
+            let udh = String(format: "060804%02X%02X%02X", ref, total, part)
+            payload = udh + payload
+        }
+
+        var pdu = "00"
+        pdu += "11"
+        pdu += "00"
+        pdu += typeByte
+        pdu += String(format: "%02X", addrLen)
+        pdu += addr
+        pdu += "00"
+        pdu += "08"
+        pdu += "00"
+        pdu += String(format: "%02X", payload.count / 2)
+        pdu += payload
+
+        return (pdu, pdu.count / 2 - 1)
     }
 
     func smsDelete(id: String) async throws {

@@ -134,6 +134,19 @@ struct MainView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if app.modem?.tempModem != nil || app.sys?.cpuTemp != nil {
+                    let m = app.modem?.tempModem.map { String(format: "%.0f", $0) }
+                    let r = app.sys?.cpuTemp.map { String(format: "%.0f", $0) }
+                    HStack(spacing: 4) {
+                        Image(systemName: "thermometer.medium")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Модем \(m ?? "—")° · Роутер \(r ?? "—")°")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.vertical, 4)
         }
