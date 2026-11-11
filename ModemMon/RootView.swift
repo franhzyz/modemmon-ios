@@ -54,7 +54,7 @@ struct BannerView: View {
 
 struct MainView: View {
     @EnvironmentObject var app: AppState
-    @State private var path: [String] = []
+    @State private var path = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $path) {
