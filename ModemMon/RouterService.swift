@@ -162,7 +162,7 @@ struct RouterService {
             let out = try await execText(script)
             if out.contains("+CMGS:") { continue } // часть ушла
             if let r = out.range(of: "+CMS ERROR:") {
-                lastError = String(out[r.lowerBound...]).prefix(140)
+                lastError = String(out[r.lowerBound...].prefix(140))
             } else {
                 lastError = String(out.prefix(140))
             }
