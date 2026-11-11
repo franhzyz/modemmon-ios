@@ -611,7 +611,7 @@ struct UciOptionEditor: View {
         busy = true
         defer { busy = false }
         let v = draft
-        await app.run { svc in try await svc.uciSet(config, section, option.name, v) }
+        guard let _: Void = await app.run({ svc in try await svc.uciSet(config, section, option.name, v) }) else { return }
         saved()
     }
 }

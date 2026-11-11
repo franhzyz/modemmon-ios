@@ -422,17 +422,40 @@ struct ForkopView: View {
     private func loadAll() async {
         if app.conn == .demo { return }
         async let st: RouterService.ForkopStatus? = app.run { svc in try await svc.forkopStatus() }
-        async let gr: [RouterService.ClashGroup]? = app.run { svc in try await svc.clashGroups() }
-        async let tr: RouterService.ClashTraffic? = app.run { svc in try await svc.clashConnections() }
-        async let nd: [String: Int]? = app.run { svc in try await svc.clashNodeDelays() }
+        async let gr: [RouterService.ClashGroup]? = optionalGroups()
+        async let tr: RouterService.ClashTraffic? = optionalTraffic()
+        async let nd: [String: Int]? = optionalDelays()
         async let cf: UciConfig? = app.run { svc in try await svc.forkopConfig() }
         async let lg: String? = app.run { svc in try await svc.forkopLog() }
         status = await st
         groups = await gr ?? []
         traffic = await tr
-        if let n = await nd { for (k, v) in n { nodeDelays[k] = v } }
+        let delays = await nd
+        if let delays {
+            for (key, value) in delays { nodeDelays[key] = value }
+        }
         cfg = await cf
         log = await lg ?? ""
+    }
+
+    // Clash API может быть выключен или доступен только локально на роутере.
+    // Фоновые опросы не должны перекрывать сообщения об ошибке сохранения.
+    private func optionalGroups() async -> [RouterService.ClashGroup]? {
+        guard let svc = app.service else { return nil }
+        return try? await svc.clashGroups()
+    }
+    private func optionalTraffic() async -> RouterService.ClashTraffic? {
+        guard let svc = app.service else { return nil }
+        return try? await svc.clashConnections()
+    }
+    private func optionalDelays() async -> [String: Int]? {
+        guard let svc = app.service else { return nil }
+        return try? await svc.clashNodeDelays()
+    }
+
+    private func optionalCoreStats() async -> RouterService.ForkopCoreStats? {
+        guard let svc = app.service else { return nil }
+        return try? await svc.forkopCoreStats()
     }
 
     private func startLive() {
@@ -441,7 +464,7 @@ struct ForkopView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 if Task.isCancelled { break }
-                if let t = await app.run({ svc in try await svc.clashConnections() }) {
+                if let t = await optionalTraffic() {
                     if let prev = prevTotals {
                         let dt = max(0.5, Date().timeIntervalSince(prev.2))
                         dash.downBps = max(0, Double(t.downTotal - prev.0) / dt)
@@ -452,7 +475,7 @@ struct ForkopView: View {
                     dash.upTotal = t.upTotal
                     dash.active = t.active
                 }
-                if let cs = await app.run({ svc in try await svc.forkopCoreStats() }) {
+                if let cs = await optionalCoreStats() {
                     dash.cpu = cs.cpuPercent
                     dash.memMB = cs.memMB
                     dash.coreUp = cs.uptimeSec
@@ -574,7 +597,7 @@ struct ForkopSectionEditor: View {
                             Spacer()
                             Button(role: .destructive) {
                                 Task {
-                                    await app.run { svc in try await svc.forkopDeleteLink(id: l.name) }
+                                    guard let _: Void = await app.run({ svc in try await svc.forkopDeleteLink(id: l.name) }) else { return }
                                     reload()
                                     dismiss()
                                 }
@@ -626,7 +649,7 @@ struct ForkopSectionEditor: View {
         .alert("Удалить секцию \(section.option("label") ?? section.name)?", isPresented: $confirmDelete) {
             Button("Удалить", role: .destructive) {
                 Task {
-                    await app.run { svc in try await svc.forkopDeleteSection(id: section.name) }
+                    guard let _: Void = await app.run({ svc in try await svc.forkopDeleteSection(id: section.name) }) else { return }
                     reload()
                     dismiss()
                 }
@@ -638,7 +661,7 @@ struct ForkopSectionEditor: View {
             TextField("vless://…", text: $newLinkUri)
             Button("Добавить") {
                 Task {
-                    await app.run { svc in try await svc.forkopAddLink(section: section.name, name: newLinkName, uri: newLinkUri) }
+                    guard let _: Void = await app.run({ svc in try await svc.forkopAddLink(section: section.name, name: newLinkName, uri: newLinkUri) }) else { return }
                     newLinkName = ""; newLinkUri = ""
                     reload()
                 }
@@ -665,14 +688,18 @@ struct ForkopSectionEditor: View {
     private func save() async {
         busy = true
         defer { busy = false }
-        await app.run { svc in
+        guard let _: Void = await app.run({ svc in
             try await svc.forkopSaveSection(id: section.name,
                                             label: label,
                                             enabled: enabled,
                                             lists: lists.sorted())
+        }) else { return }
+        // Ошибка рестарта не означает, что запись не состоялась.
+        guard let _: Void = await app.run({ svc in try await svc.forkopAction(.restart) }) else {
+            let detail = app.banner ?? "Проверьте службу и лог."
+            app.banner = "Настройки сохранены, но перезапустить Форкоп не удалось: \(detail)"
+            return
         }
-        // применяем: рестарт подхватит новые правила
-        await app.run { svc in try await svc.forkopAction(.restart) }
         reload()
         dismiss()
     }
@@ -680,7 +707,7 @@ struct ForkopSectionEditor: View {
     private func saveLink(_ l: UciSection) async {
         let n = linkDraftName[l.name] ?? (l.option("name") ?? "")
         let u = linkDraftUri[l.name] ?? (l.option("uri") ?? "")
-        await app.run { svc in try await svc.forkopSaveLink(id: l.name, name: n.isEmpty ? nil : n, uri: u.isEmpty ? nil : u) }
+        guard let _: Void = await app.run({ svc in try await svc.forkopSaveLink(id: l.name, name: n.isEmpty ? nil : n, uri: u.isEmpty ? nil : u) }) else { return }
         reload()
     }
 }
