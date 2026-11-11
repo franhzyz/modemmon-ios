@@ -20,11 +20,11 @@ struct RouterService {
 
     // MARK: - exec
 
-    func exec(_ script: String, allowDangerous: Bool = false) async throws -> UbusClient.ExecResult {
+    func exec(_ script: String, allowDangerous: Bool = false, timeout: Double = 12) async throws -> UbusClient.ExecResult {
         if settings.safeMode, !allowDangerous, let hit = RouterService.isDangerous(script) {
             throw MmError.danger(hit)
         }
-        return try await ubus.fileExec(script)
+        return try await ubus.fileExec(script, timeout: timeout)
     }
 
     func execText(_ script: String, allowDangerous: Bool = false) async throws -> String {
@@ -126,88 +126,56 @@ struct RouterService {
     }
 
     func smsSend(number: String, text: String) async throws {
+        let cleaned = number.filter { !$0.isWhitespace && $0 != "-" && $0 != "(" && $0 != ")" }
+        let digits = cleaned.hasPrefix("+") ? String(cleaned.dropFirst()) : cleaned
+        guard !digits.isEmpty, digits.count <= 20,
+              digits.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
+              !text.isEmpty, !text.contains("\0") else {
+            throw MmError.backend("Укажите корректный номер и непустой текст SMS")
+        }
         do {
-            _ = try await cgi("\(profile.modemPath)?op=sms_send&number=\(number.enc)&text=\(text.enc)", timeout: 30)
-        } catch MmError.http(let code) where code == 404 {
-            try await smsSendViaAt(number: number, text: text)
-        }
-    }
-
-    /// Отправка через AT-порт в PDU-режиме (mmcli 1.24 не умеет send, а текстовый
-    /// AT-режим модема не берёт UCS2). Кириллица — UCS2, длинные — склейка.
-    private func smsSendViaAt(number: String, text: String) async throws {
-        let port = try await findAtPort()
-
-        let ref = UInt8.random(in: 0...255)
-        let maxChars = 67
-        var chars = Array(text)
-        var parts: [[Character]] = []
-        if chars.isEmpty { parts = [[]] }
-        while !chars.isEmpty {
-            let n = min(maxChars, chars.count)
-            parts.append(Array(chars[..<n]))
-            chars.removeFirst(n)
-        }
-
-        var lastError = "нет ответа"
-        for (idx, part) in parts.enumerated() {
-            let pdu = buildSmsSubmitPdu(number: number,
-                                        ucs2Text: String(part),
-                                        ref: ref,
-                                        part: idx + 1,
-                                        total: parts.count)
-            let script = "P=/dev/\(port); stty -F $P 115200 raw -echo 2>/dev/null; " +
-                "(sleep 1; printf 'AT+CMGF=0\\r' > $P; sleep 1; printf 'AT+CMGS=\(pdu.len)\\r' > $P; sleep 2; printf '\(pdu.hex)\\032' > $P) & " +
-                "timeout 18 cat $P 2>/dev/null | tr -d '\\r'"
-            let out = try await execText(script)
-            if out.contains("+CMGS:") { continue } // часть ушла
-            if let r = out.range(of: "+CMS ERROR:") {
-                lastError = String(out[r.lowerBound...].prefix(140))
-            } else {
-                lastError = String(out.prefix(140))
+            let reply = try await cgi("\(profile.modemPath)?op=sms_send&number=\(cleaned.enc)&text=\(text.enc)", timeout: 30)
+            if let err = reply.string("error"), !err.isEmpty, err != "0" {
+                throw MmError.backend("Отправка SMS: \(err)")
             }
-            throw MmError.backend("SMS не отправлена: \(lastError)")
+            if let ok = reply.value("success") as? Bool, !ok {
+                throw MmError.backend("Роутер отклонил отправку SMS")
+            }
+        } catch MmError.http(let code) where code == 404 {
+            try await smsSendViaMm(number: cleaned, text: text)
         }
     }
 
-    /// SMS-SUBMIT PDU (UCS2, поддержка склейки длинных).
-    private func buildSmsSubmitPdu(number: String, ucs2Text: String, ref: UInt8, part: Int, total: Int) -> (hex: String, len: Int) {
-        let international = number.hasPrefix("+")
-        var digits = international ? String(number.dropFirst()) : number
-        digits = digits.filter { $0.isNumber }
-        if digits.count % 2 == 1 { digits += "F" }
-        var addr = ""
-        let cs = Array(digits)
-        var i = 0
-        while i < cs.count {
-            let a = cs[i]
-            let b = i + 1 < cs.count ? cs[i + 1] : "F"
-            addr += String(b) + String(a)
-            i += 2
+    /// Создаём сообщение, затем отправляем командой mmcli -s ID --send.
+    /// Не повторяем отправку автоматически после сбоя: результат может быть неизвестен.
+    private func smsSendViaMm(number: String, text: String) async throws {
+        let capabilities = try await exec("mmcli --help-messaging 2>&1")
+        guard capabilities.ok else { throw MmError.backend("ModemManager недоступен: \(capabilities.stdout.prefix(200))") }
+        let options = "number='\(number)'"
+        let createCommand: String
+        if capabilities.stdout.contains("--messaging-create-sms-with-text") {
+            let encoded = Data(text.utf8).base64EncodedString()
+            createCommand = "umask 077; f=$(mktemp /tmp/modemmon-sms.XXXXXX) || exit 1; " +
+                "trap 'rm -f \"$f\"' EXIT; printf '%s' '\(encoded)' | base64 -d > \"$f\" || exit 1; " +
+                "mmcli -m any --messaging-create-sms='\(options.shellQ)' --messaging-create-sms-with-text=\"$f\" 2>&1"
+        } else {
+            guard !(text.contains("'") && text.contains("\"")) else {
+                throw MmError.backend("Эта версия mmcli не поддерживает текст с обоими видами кавычек. Обновите ModemManager или измените текст.")
+            }
+            let quote = text.contains("'") ? "\"" : "'"
+            let arguments = "\(options),text=\(quote)\(text)\(quote)"
+            createCommand = "mmcli -m any --messaging-create-sms='\(arguments.shellQ)' 2>&1"
         }
-        let addrLen = cs.count
-        let typeByte = international ? "91" : "81"
-
-        var payload = ucs2Text.data(using: .utf16BigEndian)!.map { String(format: "%02X", $0) }.joined()
-        if total > 1 {
-            let udh = String(format: "060804%02X%02X%02X", ref, total, part)
-            payload = udh + payload
+        let created = try await exec(createCommand, timeout: 60)
+        guard created.ok else { throw MmError.backend("Не удалось создать SMS: \(created.stdout.prefix(250))") }
+        let prefix = "/org/freedesktop/ModemManager1/SMS/"
+        guard let range = created.stdout.range(of: prefix) else {
+            throw MmError.backend("ModemManager не вернул ID SMS: \(created.stdout.prefix(200))")
         }
-
-        var pdu = "00"                     // SCA — по умолчанию
-        pdu += "11"                        // SMS-SUBMIT, VPF relative
-        pdu += "00"                        // MR
-        pdu += typeByte
-        pdu += String(format: "%02X", addrLen)
-        pdu += addr
-        pdu += "00"                        // PID
-        pdu += "08"                        // DCS: UCS2
-        pdu += "00"                        // VP
-        pdu += String(format: "%02X", payload.count / 2)
-        pdu += payload
-
-        let bytesAfterSca = pdu.count / 2 - 1
-        return (pdu, bytesAfterSca)
+        let id = String(created.stdout[range.upperBound...].prefix(while: { $0.isNumber }))
+        guard !id.isEmpty else { throw MmError.backend("ModemManager вернул некорректный ID SMS") }
+        let sent = try await exec("mmcli -s \(id) --send 2>&1", timeout: 70)
+        guard sent.ok else { throw MmError.backend("SMS не отправлена: \(sent.stdout.prefix(250))") }
     }
 
     func smsDelete(id: String) async throws {
@@ -788,9 +756,20 @@ struct RouterService {
         return cfg
     }
 
+    /// Экранируем весь аргумент, а не только отдельные кавычки.
+    private func uciArg(_ value: String) -> String { "'\(value.shellQ)'" }
+
+    private func checkedUci(_ script: String) async throws {
+        let result = try await exec(script, allowDangerous: true)
+        guard result.ok else {
+            let detail = (result.stderr + " " + result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw MmError.backend("Не удалось сохранить настройки UCI (код \(result.code)): \(detail.prefix(250))")
+        }
+    }
+
     func uciSet(_ config: String, _ section: String, _ option: String, _ value: String) async throws {
-        let v = value.replacingOccurrences(of: "'", with: "'\\''")
-        _ = try await exec("uci set \(config.shellQ).\(section.shellQ).\(option.shellQ)='\(v)' && uci commit \(config.shellQ)", allowDangerous: true)
+        let assignment = uciArg("\(config).\(section).\(option)=\(value)")
+        try await checkedUci("uci set \(assignment) 2>&1 && uci commit \(uciArg(config)) 2>&1")
     }
 
     // MARK: - Файлы
@@ -897,10 +876,8 @@ struct RouterService {
 
     func forkopAction(_ action: SvcAction) async throws {
         let stateAction = (action == .start || action == .restart) ? "restart" : action.rawValue
-        _ = try await exec(
-            "/etc/init.d/forkop \(action.rawValue) 2>&1; /etc/init.d/forkop-state \(stateAction) 2>&1; echo done",
-            allowDangerous: true
-        )
+        let r = try await exec("/etc/init.d/forkop \(action.rawValue) 2>&1 && /etc/init.d/forkop-state \(stateAction) 2>&1", allowDangerous: true, timeout: 45)
+        guard r.ok else { throw MmError.backend("Команда службы Форкоп: \(r.stdout.prefix(250))") }
     }
 
     func forkopLog() async throws -> String {
@@ -1092,53 +1069,61 @@ struct RouterService {
     /// Сохранить поля секции (nil = не менять). lists — точный состав community_lists
     /// (перезаписывается через delete + add_list, потому что uci set не умеет списки).
     func forkopSaveSection(id: String, label: String?, enabled: Bool?, lists: [String]?) async throws {
-        var cmds: [String] = []
-        if let label { cmds.append("uci set forkop.\(id).label='\(label.shellQ)'") }
-        if let enabled { cmds.append("uci set forkop.\(id).enabled='\(enabled ? "1" : "0")'") }
+        let prefix = "forkop.\(id)"
+        var commands: [String] = []
+        if let label { commands.append("uci set \(uciArg("\(prefix).label=\(label)"))") }
+        if let enabled { commands.append("uci set \(uciArg("\(prefix).enabled=\(enabled ? "1" : "0")"))") }
         if let lists {
-            cmds.append("uci delete forkop.\(id).community_lists 2>/dev/null; true")
+            let key = uciArg("\(prefix).community_lists")
+            commands.append("(if uci -q get \(key) >/dev/null; then uci delete \(key); fi)")
             for item in lists where !item.isEmpty {
-                cmds.append("uci add_list forkop.\(id).community_lists=\(item.shellQ)")
+                commands.append("uci add_list \(uciArg("\(prefix).community_lists=\(item)"))")
             }
         }
-        guard !cmds.isEmpty else { return }
-        cmds.append("uci commit forkop")
-        _ = try await exec(cmds.joined(separator: "; "), allowDangerous: true)
+        guard !commands.isEmpty else { return }
+        commands.append("uci commit forkop")
+        try await checkedUci(commands.joined(separator: " && ") + " 2>&1")
     }
 
     func forkopDeleteSection(id: String) async throws {
-        _ = try await exec("uci delete forkop.\(id.shellQ); uci commit forkop; echo deleted", allowDangerous: true)
+        try await checkedUci("uci delete \(uciArg("forkop.\(id)")) 2>&1 && uci commit forkop 2>&1")
     }
 
     func forkopAddSection(label: String, lists: [String]) async throws {
-        var script = "NEW=$(uci add forkop section); uci set forkop.$NEW.label='\(label.shellQ)'; uci set forkop.$NEW.enabled='1'; uci set forkop.$NEW.action='connection'"
+        // $NEW генерируется самим UCI; значения передаются отдельными безопасными аргументами.
+        var cmds = ["NEW=$(uci add forkop section) || exit 1",
+                    "uci set \"forkop.$NEW.label=\"\(uciArg(label))",
+                    "uci set \"forkop.$NEW.enabled=1\"",
+                    "uci set \"forkop.$NEW.action=connection\""]
         for item in lists where !item.isEmpty {
-            script += "; uci add_list forkop.$NEW.community_lists=\(item.shellQ)"
+            cmds.append("uci add_list \"forkop.$NEW.community_lists=\"\(uciArg(item))")
         }
-        script += "; uci commit forkop; echo added"
-        _ = try await exec(script, allowDangerous: true)
+        cmds.append("uci commit forkop")
+        try await checkedUci(cmds.joined(separator: " && ") + " 2>&1")
     }
 
-    /// Ссылка-подключение: anon-секции адресуются как @connection_link[N].
     func forkopSaveLink(id: String, name: String?, uri: String?) async throws {
         var cmds: [String] = []
-        if let name { cmds.append("uci set forkop.\(id).name='\(name.shellQ)'") }
-        if let uri { cmds.append("uci set forkop.\(id).uri='\(uri.shellQ)'") }
+        if let name { cmds.append("uci set \(uciArg("forkop.\(id).name=\(name)"))") }
+        if let uri { cmds.append("uci set \(uciArg("forkop.\(id).uri=\(uri)"))") }
         guard !cmds.isEmpty else { return }
         cmds.append("uci commit forkop")
-        _ = try await exec(cmds.joined(separator: "; "), allowDangerous: true)
+        try await checkedUci(cmds.joined(separator: " && ") + " 2>&1")
     }
 
     func forkopDeleteLink(id: String) async throws {
-        _ = try await exec("uci delete forkop.\(id.shellQ); uci commit forkop; echo deleted", allowDangerous: true)
+        try await checkedUci("uci delete \(uciArg("forkop.\(id)")) 2>&1 && uci commit forkop 2>&1")
     }
 
     func forkopAddLink(section: String, name: String, uri: String) async throws {
-        _ = try await exec(
-            "NEW=$(uci add forkop connection_link); uci set forkop.$NEW.section='\(section.shellQ)'; uci set forkop.$NEW.name='\(name.shellQ)'; uci set forkop.$NEW.uri='\(uri.shellQ)'; uci set forkop.$NEW.order='0'; uci commit forkop; echo added",
-            allowDangerous: true
-        )
+        let cmds = ["NEW=$(uci add forkop connection_link) || exit 1",
+                    "uci set \"forkop.$NEW.section=\"\(uciArg(section))",
+                    "uci set \"forkop.$NEW.name=\"\(uciArg(name))",
+                    "uci set \"forkop.$NEW.uri=\"\(uciArg(uri))",
+                    "uci set \"forkop.$NEW.order=0\"", "uci commit forkop"]
+        try await checkedUci(cmds.joined(separator: " && ") + " 2>&1")
     }
+
 }
 
 // MARK: - UciSection helpers
