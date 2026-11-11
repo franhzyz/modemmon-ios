@@ -258,54 +258,76 @@ struct RouterService {
         } catch MmError.http(let code) where code == 404 {
             // mmcli ниже
         }
-        let out = try await mm("-m any 2>&1")
-        return parseMmBands(out)
+        let result = try await exec("mmcli -m any 2>&1", timeout: 25)
+        guard result.ok else {
+            throw MmError.backend("Не удалось получить бэнды: \(result.stdout.prefix(250))")
+        }
+        let info = parseMmBands(result.stdout)
+        guard !info.supported.isEmpty else {
+            throw MmError.backend("Модем не вернул список поддерживаемых бэндов")
+        }
+        return info
     }
 
     private func parseMmBands(_ out: String) -> BandsInfo {
         var supported: [String] = []
         var allowed: [String] = []
-        var target: [String]? = nil
-
-        func collect(_ seg: String) {
-            guard var arr = target else { return }
-            for tok in seg.split(whereSeparator: { $0 == "," || $0 == " " }) {
-                let s = tok.trimmingCharacters(in: .whitespaces)
-                if s.isEmpty || s == "|" { continue }
-                arr.append(s)
-                target = arr
-            }
-        }
+        var inBands = false
+        var target = ""
 
         for raw in out.split(separator: "\n") {
-            guard raw.contains("|") else { continue }
-            let seg = raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).last.map(String.init) ?? ""
-            let t = seg.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("supported:") { target = supported; collect(String(t.dropFirst(10))) }
-            else if t.hasPrefix("current:") { target = allowed; collect(String(t.dropFirst(8))) }
-            else if t == "IP" { target = nil }
-            else if target != nil { collect(t) }
+            guard let pipe = raw.firstIndex(of: "|") else { continue }
+            let section = raw[..<pipe].trimmingCharacters(in: .whitespaces)
+            if !section.isEmpty {
+                inBands = section == "Bands"
+                target = ""
+            }
+            guard inBands else { continue }
+            var text = raw[raw.index(after: pipe)...].trimmingCharacters(in: .whitespaces)
+            if text.hasPrefix("supported:") {
+                target = "supported"
+                text = String(text.dropFirst("supported:".count))
+            } else if text.hasPrefix("current:") {
+                target = "current"
+                text = String(text.dropFirst("current:".count))
+            } else if text.contains(":") {
+                target = ""
+            }
+            guard !target.isEmpty else { continue }
+            let tokens = text.split(whereSeparator: { $0 == "," || $0.isWhitespace })
+                .map(String.init).filter { !$0.isEmpty && $0 != "--" }
+            if target == "supported" { supported.append(contentsOf: tokens) }
+            else { allowed.append(contentsOf: tokens) }
         }
-        // дедуп с сохранением порядка
-        func dedup(_ a: [String]) -> [String] {
-            var seen = Set<String>(); var res: [String] = []
-            for x in a where !seen.contains(x) { seen.insert(x); res.append(x) }
-            return res
+        func dedup(_ values: [String]) -> [String] {
+            var seen = Set<String>()
+            return values.filter { seen.insert($0).inserted }
         }
         return BandsInfo(supported: dedup(supported), allowed: dedup(allowed))
     }
 
-    /// Лок бэндов: CGI (старые прошивки) или mmcli --set-allowed-bands.
+    /// Пустой список сбрасывает ограничения; смена бэндов может прервать связь.
     func applyBands(_ bands: [String]) async throws {
         do {
             let csv = bands.joined(separator: ",")
-            _ = try await cgi("\(profile.modemPath)?op=bands_set&bands=\(csv.enc)", timeout: 40)
+            let reply = try await cgi("\(profile.modemPath)?op=bands_set&bands=\(csv.enc)", timeout: 40)
+            if let error = reply.string("error"), !error.isEmpty {
+                throw MmError.backend("Бэнды: \(error)")
+            }
+            if let ok = reply.value("success") as? Bool, !ok {
+                throw MmError.backend("Роутер отклонил изменение бэндов")
+            }
         } catch MmError.http(let code) where code == 404 {
-            let mmNames = bands.map { bandToMm($0) }
-            guard !mmNames.isEmpty else { return }
-            let list = mmNames.joined(separator: ",")
-            let out = try await mm("-m any --set-allowed-bands=\(list)", timeout: 60)
-            if out.lowercased().contains("error") { throw MmError.backend("Лок бэндов: \(out.prefix(200))") }
+            let names = bands.map { bandToMm($0) }
+            let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+            guard names.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy { allowedCharacters.contains($0) } }) else {
+                throw MmError.backend("Некорректное имя бэнда")
+            }
+            let list = names.isEmpty ? "any" : names.joined(separator: "|")
+            let result = try await exec("mmcli -m any --set-current-bands='\(list.shellQ)' 2>&1", timeout: 60)
+            guard result.ok else {
+                throw MmError.backend("Не удалось применить бэнды: \(result.stdout.prefix(300))")
+            }
         }
     }
 
