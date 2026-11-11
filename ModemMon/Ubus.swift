@@ -53,7 +53,7 @@ actor UbusClient {
         self.baseURL = base
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 12
-        cfg.timeoutIntervalForResource = 30
+        cfg.timeoutIntervalForResource = 90
         cfg.httpShouldUsePipelining = false
         self.http = URLSession(configuration: cfg)
     }
@@ -71,8 +71,9 @@ actor UbusClient {
         self.user = user
     }
 
-    private func post(_ params: [Any]) async throws -> [Any] {
+    private func post(_ params: [Any], timeout: Double = 12) async throws -> [Any] {
         var req = URLRequest(url: rpcURL)
+        req.timeoutInterval = timeout
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let id = nextId
@@ -120,12 +121,12 @@ actor UbusClient {
     }
 
     /// Вызов ubus: возвращает данные (result без первого элемента-статуса).
-    func call(_ object: String, _ method: String, _ args: [String: Any] = [:]) async throws -> [Any] {
-        try await post([session, object, method, args])
+    func call(_ object: String, _ method: String, _ args: [String: Any] = [:], timeout: Double = 12) async throws -> [Any] {
+        try await post([session, object, method, args], timeout: timeout)
     }
 
-    func callData(_ object: String, _ method: String, _ args: [String: Any] = [:]) async throws -> J {
-        let r = try await call(object, method, args)
+    func callData(_ object: String, _ method: String, _ args: [String: Any] = [:], timeout: Double = 12) async throws -> J {
+        let r = try await call(object, method, args, timeout: timeout)
         guard let d = r.first else { return J([String: Any]()) }
         return J(d)
     }
@@ -139,9 +140,9 @@ actor UbusClient {
         var ok: Bool { code == 0 }
     }
 
-    func fileExec(_ script: String) async throws -> ExecResult {
+    func fileExec(_ script: String, timeout: Double = 12) async throws -> ExecResult {
         func run(_ key: String) async throws -> ExecResult {
-            let d = try await callData("file", "exec", [key: "/bin/sh", "params": ["-c", script]])
+            let d = try await callData("file", "exec", [key: "/bin/sh", "params": ["-c", script]], timeout: timeout)
             return ExecResult(code: d.int("code") ?? -1,
                               stdout: d.string("stdout") ?? "",
                               stderr: d.string("stderr") ?? "")

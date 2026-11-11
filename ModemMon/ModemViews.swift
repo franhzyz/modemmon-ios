@@ -401,8 +401,9 @@ struct SmsTab: View {
 
     private func send() async {
         let num = newNumber, txt = newText
+        guard app.conn != .demo else { app.banner = "В демо-режиме SMS не отправляются"; return }
+        guard let _: Void = await app.run({ svc in try await svc.smsSend(number: num, text: txt) }) else { return }
         newNumber = ""; newText = ""
-        await app.run { svc in try await svc.smsSend(number: num, text: txt) }
         await load()
     }
 }
