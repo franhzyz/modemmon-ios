@@ -39,6 +39,7 @@ final class AppState: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var prevNetDev: [String: (rx: Int64, tx: Int64, t: Date)] = [:]
     private var failCount = 0
+    private var sessionPassword: String?
 
     init() {
         profiles = Store.loadProfiles()
@@ -47,6 +48,8 @@ final class AppState: ObservableObject {
         if activeId == nil || !profiles.contains(where: { $0.id == activeId }) {
             activeId = profiles.first?.id
         }
+        // Пароли старых версий переносим из UserDefaults в Keychain по каждому профилю.
+        for profile in profiles { _ = storedPassword(for: profile) }
     }
 
     var active: RouterProfile? {
@@ -58,24 +61,39 @@ final class AppState: ObservableObject {
 
     // MARK: - Пароли
 
-    func password(for p: RouterProfile) -> String { Keychain.password(for: p.id.uuidString) }
-    func savePassword(_ v: String, for p: RouterProfile) { Keychain.setPassword(v, for: p.id.uuidString) }
-
-    /// Пароль с учётом галочки «Сохранять пароль»: Keychain + резерв в UserDefaults.
-    func storedPassword(for p: RouterProfile) -> String {
-        let kc = Keychain.password(for: p.id.uuidString)
-        if !kc.isEmpty { return kc }
-        guard settings.keepPassword else { return "" }
-        return UserDefaults.standard.string(forKey: "mm.pw." + p.id.uuidString) ?? ""
+    func wantsSavedPassword(_ p: RouterProfile) -> Bool {
+        p.savePassword ?? settings.keepPassword
     }
 
-    func savePasswordAuto(_ p: RouterProfile, _ pass: String) {
-        savePassword(pass, for: p)
-        if settings.keepPassword {
-            UserDefaults.standard.set(pass, forKey: "mm.pw." + p.id.uuidString)
-        } else {
-            UserDefaults.standard.removeObject(forKey: "mm.pw." + p.id.uuidString)
+    /// Переносит старый пароль из UserDefaults в Keychain при первом обращении.
+    func storedPassword(for p: RouterProfile) -> String {
+        let key = "mm.pw." + p.id.uuidString
+        let legacy = UserDefaults.standard.string(forKey: key)
+        guard wantsSavedPassword(p) else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return ""
         }
+        let stored = Keychain.password(for: p.id.uuidString)
+        if !stored.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            return stored
+        }
+        if let legacy, !legacy.isEmpty {
+            if Keychain.setPassword(legacy, for: p.id.uuidString) {
+                UserDefaults.standard.removeObject(forKey: key)
+            } else {
+                banner = "Не удалось перенести сохранённый пароль в Keychain."
+            }
+            return legacy
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+        return ""
+    }
+
+    func setSavePassword(_ enabled: Bool, for p: RouterProfile) {
+        guard let index = profiles.firstIndex(where: { $0.id == p.id }) else { return }
+        profiles[index].savePassword = enabled
+        if !enabled { clearStoredPasswords(for: p) }
     }
 
     func clearStoredPasswords(for p: RouterProfile) {
@@ -89,10 +107,19 @@ final class AppState: ObservableObject {
         conn = .connecting
         connError = nil
         banner = nil
-        savePasswordAuto(p, password)
         let client = UbusClient(base: p.baseURL)
         do {
             try await client.login(user: p.user, pass: password)
+            sessionPassword = password
+            if wantsSavedPassword(p) {
+                if Keychain.setPassword(password, for: p.id.uuidString) {
+                    UserDefaults.standard.removeObject(forKey: "mm.pw." + p.id.uuidString)
+                } else {
+                    banner = "Подключено, но пароль не удалось сохранить в Keychain."
+                }
+            } else {
+                clearStoredPasswords(for: p)
+            }
             ubus = client
             activeProfile = p
             conn = .connected
@@ -123,6 +150,8 @@ final class AppState: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         ubus = nil
+        sessionPassword = nil
+        activeProfile = nil
         conn = .disconnected
         modem = nil
         sys = nil
@@ -151,7 +180,7 @@ final class AppState: ObservableObject {
             // одна попытка перелогина
             guard let p = activeProfile else { return nil }
             do {
-                try await svc.ubus.login(user: p.user, pass: storedPassword(for: p))
+                try await svc.ubus.login(user: p.user, pass: sessionPassword ?? storedPassword(for: p))
                 return try await body(svc)
             } catch {
                 banner = "Сессия истекла, перелогин не удался: \(error.localizedDescription)"
@@ -229,7 +258,7 @@ final class AppState: ObservableObject {
     private func relogin() async {
         guard let p = activeProfile, let svc = service else { return }
         do {
-            try await svc.ubus.login(user: p.user, pass: storedPassword(for: p))
+            try await svc.ubus.login(user: p.user, pass: sessionPassword ?? storedPassword(for: p))
             failCount = 0
         } catch {
             disconnect()

@@ -4,7 +4,6 @@ import SwiftUI
 struct ConnectView: View {
     @EnvironmentObject var app: AppState
     @State private var password: String = ""
-    @State private var keepPass: Bool = true
     @State private var showEditor = false
     @State private var editTarget: RouterProfile?
 
@@ -24,15 +23,11 @@ struct ConnectView: View {
                             .textContentType(.password)
                             .submitLabel(.go)
                             .onSubmit { Task { await connect() } }
-                        Toggle("Сохранять пароль на устройстве", isOn: $keepPass)
-                            .font(.subheadline)
-                            .onChange(of: keepPass) { on in
-                                app.settings.keepPassword = on
-                                if !on {
-                                    if let p = activeProfile { app.clearStoredPasswords(for: p) }
-                                    password = ""
-                                }
-                            }
+                        Toggle("Сохранить пароль", isOn: Binding(
+                            get: { app.wantsSavedPassword(p) },
+                            set: { app.setSavePassword($0, for: p) }
+                        ))
+                        .font(.subheadline)
                     }
                     Button {
                         Task { await connect() }
@@ -84,7 +79,7 @@ struct ConnectView: View {
                         for i in idx.sorted(by: >) {
                             guard i < app.profiles.count else { continue }
                             if app.profiles[i].id == app.activeId { continue } // активный не удаляем
-                            Keychain.deletePassword(for: app.profiles[i].id.uuidString)
+                            app.clearStoredPasswords(for: app.profiles[i])
                             app.profiles.remove(at: i)
                         }
                     }
@@ -112,13 +107,15 @@ struct ConnectView: View {
             }
             .navigationTitle("ModemMon")
             .sheet(isPresented: $showEditor) {
-                ProfileEditorView(profile: editTarget ?? RouterProfile.default, isNew: editTarget == nil)
+                ProfileEditorView(profile: editTarget ?? RouterProfile(), isNew: editTarget == nil)
             }
             .onAppear {
                 if let p = activeProfile {
                     password = app.storedPassword(for: p)
                 }
-                keepPass = app.settings.keepPassword
+            }
+            .onChange(of: app.activeId) { _ in
+                password = activeProfile.map { app.storedPassword(for: $0) } ?? ""
             }
         }
     }
@@ -171,10 +168,8 @@ struct ProfileEditorView: View {
                     TextField("Пользователь", text: $profile.user, prompt: Text("root"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Пароль", text: Binding(
-                        get: { app.password(for: profile) },
-                        set: { app.savePassword($0, for: profile) }))
-                        .textContentType(.password)
+                    Text("Пароль вводится на экране подключения и сохраняется только при включённом переключателе.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle(isNew ? "Новый профиль" : "Профиль")
@@ -194,6 +189,7 @@ struct ProfileEditorView: View {
                         }
                         dismiss()
                     }
+                    .disabled(profile.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || profile.user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(1...65535).contains(profile.port))
                 }
             }
         }

@@ -12,6 +12,8 @@ struct RouterProfile: Identifiable, Codable, Equatable {
     var ubusPath: String = "/ubus"
     var modemPath: String = "/cgi-bin/modem"
     var user: String = "root"
+    // nil: настройки профиля из предыдущих версий.
+    var savePassword: Bool? = nil
 
     var baseURL: URL {
         var s = "\(scheme)://\(host)"
@@ -52,7 +54,8 @@ struct MmSettings: Codable, Equatable {
 enum Keychain {
     private static let service = "ru.franh.modemmon"
 
-    static func setPassword(_ value: String, for account: String) {
+    @discardableResult
+    static func setPassword(_ value: String, for account: String) -> Bool {
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -64,8 +67,10 @@ enum Keychain {
         if status == errSecItemNotFound {
             var add = query
             add[kSecValueData as String] = data
-            SecItemAdd(add as CFDictionary, nil)
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         }
+        return status == errSecSuccess
     }
 
     static func password(for account: String) -> String {

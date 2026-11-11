@@ -82,6 +82,14 @@ struct MainView: View {
                     Menu {
                         NavigationLink(value: "menuconfig") { Label("Настройка меню", systemImage: "slider.horizontal.3") }
                         NavigationLink(value: "settings") { Label("Настройки", systemImage: "gearshape") }
+                        Menu("Сменить роутер") {
+                            ForEach(app.profiles) { profile in
+                                Button(profile.name.isEmpty ? profile.host : profile.name) {
+                                    app.disconnect()
+                                    app.activeId = profile.id
+                                }
+                            }
+                        }
                         Button(role: .destructive) {
                             app.disconnect()
                         } label: {
