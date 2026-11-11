@@ -223,42 +223,46 @@ struct BandsView: View {
     @State private var allowed: [String] = []
     @State private var selected: Set<String> = []
     @State private var loaded = false
+    @State private var loading = false
     @State private var busy = false
 
     var body: some View {
         List {
-            Section {
+            Section("Сейчас разрешены") {
                 Text(allowed.isEmpty ? "—" : allowed.joined(separator: ", "))
                     .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.secondary)
-            } header: {
-                Text("Сейчас разрешены (allowed)")
             }
-
             Section {
-                if supported.isEmpty {
+                if loading {
                     ProgressView().frame(maxWidth: .infinity)
-                }
-                ForEach(supported, id: \.self) { b in
-                    Button {
-                        if selected.contains(b) { selected.remove(b) } else { selected.insert(b) }
-                    } label: {
-                        HStack {
-                            Text(b)
-                                .font(.system(.body, design: .monospaced).weight(.medium))
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Image(systemName: selected.contains(b) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selected.contains(b) ? Color.accentColor : .secondary)
+                } else if supported.isEmpty {
+                    Text("Список бэндов недоступен. Проверьте соединение и повторите попытку.")
+                        .foregroundStyle(.secondary)
+                    Button("Повторить") { Task { await load() } }
+                } else {
+                    ForEach(supported, id: \.self) { b in
+                        Button {
+                            if selected.contains(b) { selected.remove(b) } else { selected.insert(b) }
+                        } label: {
+                            HStack {
+                                Text(b).font(.system(.body, design: .monospaced).weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: selected.contains(b) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selected.contains(b) ? Color.accentColor : .secondary)
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
                     }
                 }
             } header: {
-                Text("Лок бэндов (выбери разрешённые)")
+                Text("Лок бэндов (выберите разрешённые)")
             } footer: {
-                Text("Пустой выбор = все бэнды. Применение заставит модем перерегистрироваться в сети — связь пропадёт на несколько секунд.")
+                Text("Пустой выбор = автоматический выбор бэндов. Применение может временно прервать связь.")
             }
-
             Section {
                 Button {
                     Task { await apply() }
@@ -270,9 +274,10 @@ struct BandsView: View {
                         Spacer()
                     }
                 }
-                .disabled(busy)
-                Button("Разрешить все (сбросить лок)") { selected = Set(supported) }
+                .disabled(busy || loading || supported.isEmpty)
+                Button("Сбросить ограничения (авто)") { selected.removeAll() }
                     .foregroundStyle(.secondary)
+                    .disabled(busy || loading || supported.isEmpty)
             }
         }
         .navigationTitle("Бэнды")
@@ -285,6 +290,9 @@ struct BandsView: View {
     }
 
     private func load() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
         if app.conn == .demo {
             supported = ["B1", "B3", "B7", "B20", "n78"]
             allowed = ["B3", "n78"]
@@ -294,19 +302,23 @@ struct BandsView: View {
         if let info = await app.run({ svc in try await svc.bandsInfo() }) {
             supported = info.supported
             allowed = info.allowed
-            selected = Set(info.allowed)
+            selected = Set(info.allowed.filter { info.supported.contains($0) })
         }
     }
 
     private func apply() async {
+        guard app.conn != .demo else { app.banner = "В демо-режиме бэнды не применяются"; return }
+        guard let service = app.service else { app.banner = "Нет подключения к роутеру"; return }
         busy = true
         defer { busy = false }
-        guard app.conn != .demo else { return }
         do {
-            try await app.service?.applyBands(Array(selected).sorted())
+            try await service.applyBands(Array(selected).sorted())
             if let info = await app.run({ svc in try await svc.bandsInfo() }) {
                 allowed = info.allowed
                 supported = info.supported
+                selected = Set(info.allowed.filter { info.supported.contains($0) })
+            } else {
+                app.banner = "Команда отправлена, но проверить результат не удалось. Обновите список."
             }
         } catch {
             app.banner = "Бэнды: \(error.localizedDescription)"
