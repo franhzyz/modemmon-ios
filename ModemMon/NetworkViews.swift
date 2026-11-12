@@ -199,48 +199,11 @@ struct IfaceEditView: View {
             }
 
             if secId == nil, let c = cfg {
-                Section("Секция UCI не найдена по имени — выбери вручную") {
-                    ForEach(c.sections.filter { $0.type == "interface" }) { s in
-                        Button {
-                            secId = s.name
-                        } label: {
-                            Text("\(s.name) · proto \(s.option("proto") ?? "?")")
-                        }
-                    }
-                }
+                uciSectionPicker(c)
             }
 
             if let secId, let c = cfg, let sec = c.sections.first(where: { $0.name == secId }) {
-                Section("Опции UCI: network.\(sec.anon ? sec.name : secId)") {
-                    ForEach(sec.options) { o in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(o.name).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                                Spacer()
-                                Button {
-                                    editValue = o.value
-                                    editing = o
-                                } label: { Image(systemName: "pencil.circle") }
-                                    .buttonStyle(.borderless)
-                                Button(role: .destructive) {
-                                    Task { await deleteOption(o.name) }
-                                } label: { Image(systemName: "trash").font(.caption) }
-                                    .buttonStyle(.borderless)
-                            }
-                            Text(o.value)
-                                .font(.system(.caption, design: .monospaced))
-                                .lineLimit(3)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    Button {
-                        addOption = true
-                    } label: {
-                        Label("Добавить опцию", systemImage: "plus")
-                    }
-                } footer: {
-                    Text("Пиры и тонкие настройки туннелей — в «Конфиг UCI → network». Каждое изменение сразу пишется в uci (commit).")
-                }
+                uciOptionsSection(sec, sectionId: secId)
             }
 
             Section {
@@ -302,10 +265,60 @@ struct IfaceEditView: View {
         }
     }
 
+    private func uciSectionPicker(_ config: UciConfig) -> some View {
+        let interfaces = config.sections.filter { $0.type == "interface" }
+        return Section("Секция UCI не найдена по имени — выбери вручную") {
+            ForEach(interfaces) { section in
+                let proto = section.options.first(where: { $0.name == "proto" })?.value ?? "?"
+                Button("\(section.name) · proto \(proto)") {
+                    secId = section.name
+                }
+            }
+        }
+    }
+
+    private func uciOptionsSection(_ section: UciSection, sectionId: String) -> some View {
+        Section {
+            ForEach(section.options) { option in
+                uciOptionRow(option)
+            }
+            Button { addOption = true } label: {
+                Label("Добавить опцию", systemImage: "plus")
+            }
+        } header: {
+            Text("Опции UCI: network.\(section.anon ? section.name : sectionId)")
+        } footer: {
+            Text("Пиры и тонкие настройки туннелей — в «Конфиг UCI → network». Каждое изменение сразу пишется в uci (commit).")
+        }
+    }
+
+    private func uciOptionRow(_ option: UciOption) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(option.name).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    editValue = option.value
+                    editing = option
+                } label: { Image(systemName: "pencil.circle") }
+                    .buttonStyle(.borderless)
+                Button(role: .destructive) {
+                    Task { await deleteOption(option.name) }
+                } label: { Image(systemName: "trash").font(.caption) }
+                    .buttonStyle(.borderless)
+            }
+            Text(option.value)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(3)
+                .textSelection(.enabled)
+        }
+    }
+
     private func findSecId(_ c: UciConfig) -> String? {
         if let s = c.sections.first(where: { $0.type == "interface" && $0.name == iface.name }) { return s.name }
         for s in c.sections where s.type == "interface" && s.anon {
-            if s.option("device") == iface.device || s.option("ifname") == iface.device { return s.name }
+            if s.options.first(where: { $0.name == "device" })?.value == iface.device ||
+               s.options.first(where: { $0.name == "ifname" })?.value == iface.device { return s.name }
         }
         return nil
     }
