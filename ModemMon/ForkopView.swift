@@ -18,6 +18,7 @@ struct ForkopView: View {
     @State private var nodeDelays: [String: Int] = [:]
     @State private var testing = false
     @State private var updating = false
+    @State private var groupTestStatus: [String: String] = [:]
 
     struct DashInfo {
         var downBps: Double = 0
@@ -133,6 +134,24 @@ struct ForkopView: View {
                     .buttonStyle(.bordered)
                     .disabled(updating)
                 }
+                if testing || !groupTestStatus.isEmpty {
+                    ForEach(groups) { g in
+                        HStack {
+                            Text(g.name).font(.caption)
+                            Spacer()
+                            let st = groupTestStatus[g.name]
+                            if testing && st == nil {
+                                Text("—").font(.caption).foregroundStyle(.secondary)
+                            } else if let st {
+                                Text(st)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(st.hasPrefix("ok") ? Color.green : (st == "тестирую…" ? .secondary : .orange))
+                            } else if let now = g.now, let ms = nodeDelays[now] {
+                                Text("\(ms)мс").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             } else {
                 Text("Дашборд появится, когда sing-box запущен (Clash API :9090)")
                     .font(.footnote)
@@ -145,13 +164,27 @@ struct ForkopView: View {
         testing = true
         defer { testing = false }
         for g in groups {
+            groupTestStatus[g.name] = "тестирую…"
             if let d = await app.run({ svc in try await svc.clashTestGroup(g.name) }) {
                 for (k, v) in d { nodeDelays[k] = v }
+                let mine = d.filter { g.all.contains($0.key) }
+                if let best = mine.values.min(), best > 0 {
+                    groupTestStatus[g.name] = "ok · \(best)мс (из \(mine.count))"
+                } else if let now = g.now, let d2 = nodeDelays[now] {
+                    groupTestStatus[g.name] = "ok · \(d2)мс"
+                } else {
+                    groupTestStatus[g.name] = "нет ответа"
+                }
+            } else {
+                groupTestStatus[g.name] = "ошибка"
             }
         }
         if let nd = await app.run({ svc in try await svc.clashNodeDelays() }) {
             for (k, v) in nd { nodeDelays[k] = v }
         }
+        // удерживаем итоги пару секунд
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        groupTestStatus = [:]
     }
 
     private func updateLists() async {

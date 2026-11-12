@@ -256,7 +256,7 @@ struct IfaceEditView: View {
             Button("Отмена", role: .cancel) { editing = nil }
         }
         .alert("\(ifAction) \(iface.name)?", isPresented: $confirmIf) {
-            Button(ifAction, role: ifAction == "ifdown" ? .destructive : .none) {
+            Button(ifAction, role: ifAction == "ifdown" ? ButtonRole.destructive : nil) {
                 Task {
                     await app.run { svc in try await svc.exec("if\(ifAction == "ifup" ? "up" : "down") \(iface.name) 2>&1; echo done") }
                 }
