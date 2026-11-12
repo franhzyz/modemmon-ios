@@ -146,7 +146,7 @@ struct ForkopView: View {
                                 Text(st)
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(st.hasPrefix("ok") ? Color.green : (st == "тестирую…" ? .secondary : .orange))
-                            } else if let now = g.now, let ms = nodeDelays[now] {
+                            } else if let ms = nodeDelays[g.now] {
                                 Text("\(ms)мс").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
@@ -170,7 +170,7 @@ struct ForkopView: View {
                 let mine = d.filter { g.all.contains($0.key) }
                 if let best = mine.values.min(), best > 0 {
                     groupTestStatus[g.name] = "ok · \(best)мс (из \(mine.count))"
-                } else if let now = g.now, let d2 = nodeDelays[now] {
+                } else if let d2 = nodeDelays[g.now] {
                     groupTestStatus[g.name] = "ok · \(d2)мс"
                 } else {
                     groupTestStatus[g.name] = "нет ответа"
