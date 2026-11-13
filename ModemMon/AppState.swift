@@ -303,7 +303,11 @@ final class AppState: ObservableObject {
             return
         }
         guard let svc = service else { return }
-        let ifaces = ["wwan0", "wwan1", "eth1", "usb0"]
+        // сначала реальные маршруты по умолчанию (модем, кабель — что угодно), потом известные имена
+        var ifaces = (try? await svc.defaultRouteIfaces()) ?? []
+        for f in ["wwan0", "wwan1", "eth1", "waneth", "eth0", "usb0"] where !ifaces.contains(f) {
+            ifaces.append(f)
+        }
         for f in ifaces {
             if let probe = try? await svc.uplinkProbe(iface: f), probe.ok {
                 uplink = UplinkState(st: .ok,

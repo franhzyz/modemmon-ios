@@ -930,6 +930,24 @@ struct RouterService {
 
     struct UplinkProbe { var iface: String; var httpCode: Int?; var seconds: Double?; var ok: Bool }
 
+    /// Интерфейсы с маршрутом по умолчанию, в порядке приоритета метрик.
+    func defaultRouteIfaces() async throws -> [String] {
+        let out = try await execText("ip -4 route show default 2>/dev/null")
+        var seen = Set<String>()
+        var res: [String] = []
+        for line in out.split(separator: "\n") {
+            let p = line.split(separator: " ")
+            if let i = p.firstIndex(of: "dev"), i + 1 < p.count {
+                let f = String(p[i + 1])
+                if !f.isEmpty && !seen.contains(f) {
+                    seen.insert(f)
+                    res.append(f)
+                }
+            }
+        }
+        return res
+    }
+
     func uplinkProbe(iface: String) async throws -> UplinkProbe {
         let out = try await execText(
             "curl -s -o /dev/null --interface \(iface.shellQ) --max-time 6 -w '%{http_code} %{time_total}' http://connectivitycheck.gstatic.com/generate_204 2>&1"
