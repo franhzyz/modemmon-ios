@@ -104,16 +104,17 @@ struct MainView: View {
     }
 
     /// Через что реально ходит интернет: модем или провод
+    /// Классификация строго по фактическому интерфейсу аплинка:
+    /// wwan/usb/qmi/modem — сотовый, всё остальное (eth/wan/br/pppoe/…) — провод.
+    /// Пока маршрут неизвестен — нейтральное «Подключено».
     private var viaModem: Bool {
         let p = app.uplink.path.lowercased()
-        if p.hasPrefix("eth") || p.hasPrefix("wan") || p.hasPrefix("lan") || p.contains("br-") { return false }
-        if p.hasPrefix("wwan") || p.hasPrefix("usb") || p.contains("qmi") || p.contains("modem") { return true }
-        // путь ещё не проверен — считаем по наличию данных модема
-        return app.modem?.operatorName.isEmpty == false
+        return p.hasPrefix("wwan") || p.hasPrefix("usb") || p.contains("qmi") || p.contains("modem")
     }
 
     private var headerTitle: String {
         if app.conn == .demo { return "Демо-режим" }
+        if app.uplink.path.isEmpty { return "Подключено" }
         if viaModem {
             return app.modem?.operatorName.isEmpty == false ? app.modem!.operatorName : "Подключено (модем)"
         }
@@ -124,7 +125,12 @@ struct MainView: View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    if viaModem {
+                    if app.uplink.path.isEmpty {
+                        Image(systemName: "network")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40)
+                    } else if viaModem {
                         SignalBars(rsrp: app.modem?.bestRsrp, size: 22)
                     } else {
                         Image(systemName: "cable.connector")
