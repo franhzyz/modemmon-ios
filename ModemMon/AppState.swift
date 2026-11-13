@@ -243,10 +243,18 @@ final class AppState: ObservableObject {
             if let on = mres.online {
                 uplink = UplinkState(st: on ? .ok : .fail,
                                      latencyMs: mres.reachLatencyMs ?? uplink.latencyMs,
-                                     path: "wwan0",
+                                     path: mres.bearerIface ?? uplink.path,
                                      checkedAt: Date(),
                                      detail: "telemetry")
             }
+        }
+        // страховка: проба не прошла, но трафик ощутимо идёт — канал жив
+        if uplink.st == .fail, let maxRate = ifaceRates.values.max(), maxRate > 500_000 {
+            uplink = UplinkState(st: .ok,
+                                 latencyMs: uplink.latencyMs,
+                                 path: uplink.path.isEmpty ? "?" : uplink.path,
+                                 checkedAt: Date(),
+                                 detail: "по факту трафика")
         }
         appendTrend()
         if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {

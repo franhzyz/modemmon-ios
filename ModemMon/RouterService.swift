@@ -949,13 +949,15 @@ struct RouterService {
     }
 
     func uplinkProbe(iface: String) async throws -> UplinkProbe {
+        // Проба по IP без DNS: если sing-box DNS лежит, curl по имени дал бы 000
+        // при работающем канале. Любой HTTP-код = интерфейс в интернете.
         let out = try await execText(
-            "curl -s -o /dev/null --interface \(iface.shellQ) --max-time 6 -w '%{http_code} %{time_total}' http://connectivitycheck.gstatic.com/generate_204 2>&1"
+            "curl -s -o /dev/null --interface \(iface.shellQ) --max-time 6 -w '%{http_code} %{time_total}' http://1.1.1.1 2>&1"
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         let p = out.split(separator: " ")
         let code = p.first.flatMap { Int($0) }
         let secs = p.count > 1 ? Double(p[1]) : nil
-        return UplinkProbe(iface: iface, httpCode: code, seconds: secs, ok: code == 204)
+        return UplinkProbe(iface: iface, httpCode: code, seconds: secs, ok: (code ?? 0) >= 100)
     }
 
     // MARK: - Терминатор операций (reboot и т.п.)

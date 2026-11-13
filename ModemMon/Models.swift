@@ -180,6 +180,7 @@ struct ModemSnapshot {
 
     var online: Bool?
     var reachLatencyMs: Double?
+    var bearerIface: String?
 
     static let empty = ModemSnapshot()
 
@@ -189,6 +190,7 @@ struct ModemSnapshot {
     init(telemetry: J) {
         online = telemetry.bool("online")
         reachLatencyMs = telemetry.sub("engine")?.num("reach_latency_ms")
+        bearerIface = telemetry.sub("bearer")?.string("interface")
 
         operatorName = telemetry.string("operator") ?? telemetry.sub("sim")?.string("operator_name") ?? ""
         operatorCode = telemetry.sub("sim")?.string("operator_code") ?? telemetry.string("plmn") ?? ""
