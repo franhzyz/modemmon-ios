@@ -103,13 +103,37 @@ struct MainView: View {
         }
     }
 
+    /// Через что реально ходит интернет: модем или провод
+    private var viaModem: Bool {
+        let p = app.uplink.path.lowercased()
+        if p.hasPrefix("eth") || p.hasPrefix("wan") || p.hasPrefix("lan") || p.contains("br-") { return false }
+        if p.hasPrefix("wwan") || p.hasPrefix("usb") || p.contains("qmi") || p.contains("modem") { return true }
+        // путь ещё не проверен — считаем по наличию данных модема
+        return app.modem?.operatorName.isEmpty == false
+    }
+
+    private var headerTitle: String {
+        if app.conn == .demo { return "Демо-режим" }
+        if viaModem {
+            return app.modem?.operatorName.isEmpty == false ? app.modem!.operatorName : "Подключено (модем)"
+        }
+        return "Подключено (кабель)"
+    }
+
     private var headerSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    SignalBars(rsrp: app.modem?.bestRsrp, size: 22)
+                    if viaModem {
+                        SignalBars(rsrp: app.modem?.bestRsrp, size: 22)
+                    } else {
+                        Image(systemName: "cable.connector")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40)
+                    }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(app.modem?.operatorName.isEmpty == false ? app.modem!.operatorName : (app.conn == .demo ? "Демо-режим" : "Подключено"))
+                        Text(headerTitle)
                             .font(.headline)
                         Text(statusLine)
                             .font(.caption)
@@ -118,7 +142,7 @@ struct MainView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 4) {
                         uplinkBadge
-                        if let r = app.modem?.bestRsrp {
+                        if viaModem, let r = app.modem?.bestRsrp {
                             Text(Fmt.dbm(r)).font(.caption).monospacedDigit().foregroundStyle(rsrpColor(r))
                         }
                     }
@@ -154,7 +178,10 @@ struct MainView: View {
 
     private var statusLine: String {
         var parts: [String] = []
-        if let m = app.modem {
+        if !app.uplink.path.isEmpty {
+            parts.append(viaModem ? "модем (\(app.uplink.path))" : "кабель (\(app.uplink.path))")
+        }
+        if viaModem, let m = app.modem {
             if !m.rat.isEmpty { parts.append(m.rat) }
             if !m.band.isEmpty { parts.append(m.band) }
         }
