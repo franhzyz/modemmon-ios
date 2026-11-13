@@ -249,7 +249,7 @@ final class AppState: ObservableObject {
             }
         }
         // страховка: проба не прошла, но трафик ощутимо идёт — канал жив
-        if uplink.st == .fail, let maxRate = ifaceRates.values.max(), maxRate > 500_000 {
+        if uplink.st == .fail, let maxRate = ifaceRates.values.max(), maxRate > 20_000 {
             uplink = UplinkState(st: .ok,
                                  latencyMs: uplink.latencyMs,
                                  path: uplink.path.isEmpty ? "?" : uplink.path,
@@ -311,7 +311,17 @@ final class AppState: ObservableObject {
             return
         }
         guard let svc = service else { return }
-        // сначала реальные маршруты по умолчанию (модем, кабель — что угодно), потом известные имена
+        // 1. Роутер сам ходит в интернет (без привязки к интерфейсу) — самый честный тест
+        if let p = try? await svc.uplinkProbeUnbound(), p.ok {
+            let path = (try? await svc.defaultRouteIfaces())?.first ?? ""
+            uplink = UplinkState(st: .ok,
+                                 latencyMs: p.seconds,
+                                 path: path,
+                                 checkedAt: Date(),
+                                 detail: "HTTP \(p.httpCode ?? 0)")
+            return
+        }
+        // 2. По интерфейсам (привязка через curl) — находим живой канал
         var ifaces = (try? await svc.defaultRouteIfaces()) ?? []
         for f in ["wwan0", "wwan1", "eth1", "waneth", "eth0", "usb0"] where !ifaces.contains(f) {
             ifaces.append(f)

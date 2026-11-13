@@ -948,6 +948,18 @@ struct RouterService {
         return res
     }
 
+    /// Главный тест: роутер сам ходит в интернет через свои маршруты.
+    /// curl есть почти везде; где нет — busybox wget (он есть всегда).
+    func uplinkProbeUnbound() async throws -> UplinkProbe {
+        let out = try await execText(
+            "if command -v curl >/dev/null 2>&1; then " +
+            "curl -s -o /dev/null --max-time 6 -w '%{http_code}' http://1.1.1.1 2>/dev/null; " +
+            "else wget -q -O /dev/null -T 6 http://1.1.1.1 2>/dev/null && echo 200 || echo 000; fi"
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = Int(out) ?? 0
+        return UplinkProbe(iface: "", httpCode: code, seconds: nil, ok: code >= 100)
+    }
+
     func uplinkProbe(iface: String) async throws -> UplinkProbe {
         // Двухступенчатая проверка через интерфейс:
         //  1) http://1.1.1.1 — линк есть (TCP проходит) — работает даже без DNS
