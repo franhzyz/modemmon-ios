@@ -236,17 +236,11 @@ final class AppState: ObservableObject {
         }
         // Остальное — по возможности
         if let devs = try? await svc.netDev() { updateRates(devs) }
-        // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере
+        // Данные модема (CGI medvemodem) — необязательны: их может не быть на роутере.
+        // Важно: телеметрия может быть форвардингом с другого роутера (например, с Зеро)
+        // и описывает МОДЕМ, а не интернет ЭТОГО роутера — поэтому бейдж аплинка не трогаем.
         if let mres = try? await svc.modemStatus() {
             modem = mres
-            // телеметрия сама говорит про интернет — не гоняем лишний curl
-            if let on = mres.online {
-                uplink = UplinkState(st: on ? .ok : .fail,
-                                     latencyMs: mres.reachLatencyMs ?? uplink.latencyMs,
-                                     path: mres.bearerIface ?? uplink.path,
-                                     checkedAt: Date(),
-                                     detail: "telemetry")
-            }
         }
         // страховка: проба не прошла, но трафик ощутимо идёт — канал жив
         if uplink.st == .fail, let maxRate = ifaceRates.values.max(), maxRate > 20_000 {
