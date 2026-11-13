@@ -949,15 +949,20 @@ struct RouterService {
     }
 
     func uplinkProbe(iface: String) async throws -> UplinkProbe {
-        // Проба по IP без DNS: если sing-box DNS лежит, curl по имени дал бы 000
-        // при работающем канале. Любой HTTP-код = интерфейс в интернете.
+        // Двухступенчатая проверка через интерфейс:
+        //  1) http://1.1.1.1 — линк есть (TCP проходит) — работает даже без DNS
+        //  2) gstatic 204 — настоящий интернет (карrier-блокировка модема не даёт 204)
         let out = try await execText(
-            "curl -s -o /dev/null --interface \(iface.shellQ) --max-time 6 -w '%{http_code} %{time_total}' http://1.1.1.1 2>&1"
+            "c1=$(curl -s -o /dev/null --interface \(iface.shellQ) --max-time 5 -w '%{http_code}' http://1.1.1.1 2>/dev/null); " +
+            "c2=$(curl -s -o /dev/null --interface \(iface.shellQ) --max-time 6 -w '%{http_code}' http://connectivitycheck.gstatic.com/generate_204 2>/dev/null); " +
+            "echo \"$c1 $c2\""
         ).trimmingCharacters(in: .whitespacesAndNewlines)
-        let p = out.split(separator: " ")
-        let code = p.first.flatMap { Int($0) }
-        let secs = p.count > 1 ? Double(p[1]) : nil
-        return UplinkProbe(iface: iface, httpCode: code, seconds: secs, ok: (code ?? 0) >= 100)
+        let p = out.split(separator: " ").map { Int($0) ?? 0 }
+        let link = p.count > 0 ? p[0] : 0
+        let net = p.count > 1 ? p[1] : 0
+        let ok = net == 204 || (net == 000 && link >= 100) // линк есть, но DNS sing-box не ответил
+        return UplinkProbe(iface: iface, httpCode: net == 0 ? link : net,
+                           seconds: nil, ok: ok)
     }
 
     // MARK: - Терминатор операций (reboot и т.п.)
