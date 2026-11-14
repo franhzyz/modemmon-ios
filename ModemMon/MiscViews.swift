@@ -420,6 +420,9 @@ struct DiagnosticsView: View {
     @State private var speedPhase = ""
     @State private var speedDown: Double?
     @State private var speedUp: Double?
+    @State private var speedPing: Double?
+    @State private var speedIfaces: [String] = []
+    @State private var speedError: String?
 
     var body: some View {
         List {
@@ -447,13 +450,13 @@ struct DiagnosticsView: View {
                     .buttonStyle(.borderless)
                 }
             }
-            Section("Спидтест (через роутер)") {
-                HStack(spacing: 8) {
-                    ForEach(["", "wwan0", "waneth"], id: .self) { f in
+            Section("Спидтест (Яндекс)") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach([""] + speedIfaces, id: \.self) { f in
                         Button {
                             speedIface = f
                         } label: {
-                            Text(f.isEmpty ? "Авто" : f)
+                            Text(f.isEmpty ? "Авто" : Self.ifaceLabel(f))
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
@@ -462,7 +465,6 @@ struct DiagnosticsView: View {
                         }
                         .buttonStyle(.borderless)
                     }
-                    Spacer()
                 }
                 Button {
                     Task { await runSpeedTest() }
@@ -475,16 +477,36 @@ struct DiagnosticsView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(speedBusy)
-                if speedDown != nil || speedUp != nil {
-                    HStack(spacing: 16) {
+                if speedDown != nil || speedUp != nil || speedPing != nil {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("↓ \(speedDown.map { String(format: "%.1f", $0) } ?? "—") Мбит/с")
                             .font(.body.monospacedDigit())
-                            .foregroundStyle(Accent)
+                            .foregroundStyle(.green)
                         Text("↑ \(speedUp.map { String(format: "%.1f", $0) } ?? "—") Мбит/с")
                             .font(.body.monospacedDigit())
-                            .foregroundStyle(Accent)
+                            .foregroundStyle(.green)
+                        if let p = speedPing {
+                            Text("Пинг \(String(format: "%.0f", p)) мс")
+                                .font(.body.monospacedDigit())
+                                .foregroundStyle(.green)
+                        }
                     }
                 }
+                if let e = speedError {
+                    Text(e).font(.caption).foregroundStyle(.red)
+                }
+            }
+            .task {
+                guard speedIfaces.isEmpty, app.service != nil else { return }
+                let out = (try? await app.service?.execText(
+                    "ip -o link show | awk -F': ' '{print $2}' | grep -E '^(pppoe|wwan|usb|qmi|wan)' | grep -v '@'; exit 0"
+                )) ?? ""
+                let names = out
+                    .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                var seen = Set<String>()
+                speedIfaces = Array(names.filter { seen.insert($0).inserted }.prefix(4))
             }
             Section("Ping с роутера") {
                 TextField("хост", text: $host)
@@ -512,23 +534,88 @@ struct DiagnosticsView: View {
         .navigationTitle("Диагностика")
     }
 
+    private static func ifaceLabel(_ n: String) -> String {
+        if n.hasPrefix("wwan") || n.hasPrefix("qmi") { return "Модем (\(n))" }
+        if n.hasPrefix("usb") || n.hasPrefix("pppoe") || n.contains("wan") { return "Кабель (\(n))" }
+        return n
+    }
+
+    /// Спидтест Яндекс.Интернетометра: замер в фоне на роутере,
+    /// приложение опрашивает /tmp/mm_speed_* раз в 2 с (короткие вызовы).
     private func runSpeedTest() async {
+        guard let svc = app.service else { return }
         speedBusy = true
         defer { speedBusy = false }
-        let bind = speedIface.isEmpty ? "" : "--interface \(speedIface) "
-        speedPhase = "Скачивание…"
-        let dOut = (try? await app.service?.execText(
-            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=50000000' 2>/dev/null"
-        )) ?? ""
-        speedDown = Double(dOut.trimmingCharacters(in: .whitespaces)).map { $0 * 8 / 1_000_000 }
-        speedPhase = "Отправка…"
-        let uOut = (try? await app.service?.execText(
+        speedDown = nil; speedUp = nil; speedPing = nil; speedError = nil
+        speedPhase = "Запуск…"
+        let safe = speedIface.filter { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-".contains($0) }
+        let bind = safe.isEmpty ? "" : "--interface \(safe) "
+        let script =
+            "rm -f /tmp/mm_speed_phase /tmp/mm_speed_result; { " +
+            "echo down > /tmp/mm_speed_phase; " +
+            "j=\"$(curl -s -m 8 -H 'Referer: https://yandex.ru/internet/' " +
+            "\"https://yandex.ru/internet/api/v0/get-probes?t=$(date +%s000)\")\"; " +
+            "durl=\"$(echo \"$j\" | grep -o 'https://[^\"]*probes/50mb[^\"]*' | head -1)\"; " +
+            "uurl=\"$(echo \"$j\" | grep -o 'https://[^\"]*upload[^\"]*' | head -1)\"; " +
+            "purl=\"$(echo \"$j\" | grep -o 'https://[^\"]*/ping[^\"]*' | head -1)\"; " +
+            "if [ -z \"$durl\" ]; then echo err > /tmp/mm_speed_result; exit 0; fi; " +
+            "res() { for dns in 77.88.8.8 1.1.1.1 8.8.8.8; do " +
+            "r=\"$(nslookup \"$1\" \"$dns\" 2>/dev/null | awk '/Address/{print $NF}' | " +
+            "grep -E '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$' | head -1)\"; " +
+            "[ -n \"$r\" ] && { echo \"$r\"; return; }; done; }; " +
+            "dhost=\"$(echo \"$durl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
+            "uhost=\"$(echo \"$uurl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
+            "phost=\"$(echo \"$purl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
+            "dip=\"$(res \"$dhost\")\"; uip=\"$(res \"$uhost\")\"; pip=\"$(res \"$phost\")\"; " +
+            "d=\"$(curl -s -o /dev/null --max-time 10 \(bind)" +
+            "--resolve \"$dhost:443:$dip\" -w '%{speed_download}' \"$durl&rid=mm$(date +%s)\" 2>/dev/null)\"; " +
+            "echo up > /tmp/mm_speed_phase; " +
             "dd if=/dev/zero of=/tmp/mm_up.bin bs=1M count=10 2>/dev/null; " +
-            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_upload}' -X POST --data-binary @/tmp/mm_up.bin 'https://speed.cloudflare.com/__up' 2>/dev/null; " +
-            "rm -f /tmp/mm_up.bin"
-        )) ?? ""
-        speedUp = Double(uOut.trimmingCharacters(in: .whitespaces)).map { $0 * 8 / 1_000_000 }
-        speedPhase = ""
+            "u=\"$(curl -s -o /dev/null --max-time 15 \(bind)" +
+            "--resolve \"$uhost:443:$uip\" -X POST -H 'Content-Type: application/octet-stream' " +
+            "--data-binary @/tmp/mm_up.bin -w '%{speed_upload}' \"$uurl&rid=mm$(date +%s)\" 2>/dev/null)\"; " +
+            "rm -f /tmp/mm_up.bin; echo ping > /tmp/mm_speed_phase; " +
+            "p=\"$(curl -s -o /dev/null -m 3 \(bind)" +
+            "--resolve \"$phost:443:$pip\" -w '%{time_starttransfer}' \"$purl&rid=mm1\" 2>/dev/null)\"; " +
+            "echo \"$d $u $p\" > /tmp/mm_speed_result; " +
+            "} >/dev/null 2>&1 </dev/null & echo started"
+        do {
+            _ = try await svc.execText(script)
+            for _ in 0..<25 {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let out = (try? await svc.execText(
+                    "cat /tmp/mm_speed_phase 2>/dev/null; echo ---; cat /tmp/mm_speed_result 2>/dev/null; exit 0"
+                )) ?? ""
+                let parts = out.components(separatedBy: "---")
+                let ph = (parts.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let res = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                if !ph.isEmpty {
+                    switch ph {
+                    case "down": speedPhase = "Скачивание…"
+                    case "up": speedPhase = "Отдача…"
+                    case "ping": speedPhase = "Пинг…"
+                    default: speedPhase = ph
+                    }
+                }
+                if !res.isEmpty {
+                    if res == "err" {
+                        speedError = "Роутер не получил серверы замера"
+                    } else {
+                        let pr = res.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                        speedDown = pr.first.flatMap { Double($0) }.map { $0 * 8 / 1_000_000 }
+                        speedUp = pr.dropFirst().first.flatMap { Double($0) }.map { $0 * 8 / 1_000_000 }
+                        speedPing = pr.dropFirst(2).first.flatMap { Double($0) }.map { $0 * 1000 }
+                    }
+                    speedPhase = ""
+                    return
+                }
+            }
+            speedError = "Не дождались результата замера (таймаут)"
+            speedPhase = ""
+        } catch {
+            speedError = error.localizedDescription
+            speedPhase = ""
+        }
     }
 
     private func probe(_ iface: String) async {
