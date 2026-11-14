@@ -415,6 +415,11 @@ struct DiagnosticsView: View {
     @State private var host = "8.8.8.8"
     @State private var pingOut = ""
     @State private var busy = false
+    @State private var speedIface = ""
+    @State private var speedBusy = false
+    @State private var speedPhase = ""
+    @State private var speedDown: Double?
+    @State private var speedUp: Double?
 
     var body: some View {
         List {
@@ -442,6 +447,45 @@ struct DiagnosticsView: View {
                     .buttonStyle(.borderless)
                 }
             }
+            Section("Спидтест (через роутер)") {
+                HStack(spacing: 8) {
+                    ForEach(["", "wwan0", "waneth"], id: .self) { f in
+                        Button {
+                            speedIface = f
+                        } label: {
+                            Text(f.isEmpty ? "Авто" : f)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(speedIface == f ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    Spacer()
+                }
+                Button {
+                    Task { await runSpeedTest() }
+                } label: {
+                    HStack {
+                        if speedBusy { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "speedometer")
+                        Text(speedBusy ? speedPhase : "Запустить спидтест")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(speedBusy)
+                if speedDown != nil || speedUp != nil {
+                    HStack(spacing: 16) {
+                        Text("↓ \(speedDown.map { String(format: "%.1f", $0) } ?? "—") Мбит/с")
+                            .font(.body.monospacedDigit())
+                            .foregroundStyle(Accent)
+                        Text("↑ \(speedUp.map { String(format: "%.1f", $0) } ?? "—") Мбит/с")
+                            .font(.body.monospacedDigit())
+                            .foregroundStyle(Accent)
+                    }
+                }
+            }
             Section("Ping с роутера") {
                 TextField("хост", text: $host)
                     .keyboardType(.URL)
@@ -466,6 +510,25 @@ struct DiagnosticsView: View {
             }
         }
         .navigationTitle("Диагностика")
+    }
+
+    private func runSpeedTest() async {
+        speedBusy = true
+        defer { speedBusy = false }
+        let bind = speedIface.isEmpty ? "" : "--interface \(speedIface) "
+        speedPhase = "Скачивание…"
+        let dOut = (try? await app.service?.execText(
+            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=50000000' 2>/dev/null"
+        )) ?? ""
+        speedDown = Double(dOut.trimmingCharacters(in: .whitespaces)).map { $0 * 8 / 1_000_000 }
+        speedPhase = "Отправка…"
+        let uOut = (try? await app.service?.execText(
+            "dd if=/dev/zero of=/tmp/mm_up.bin bs=1M count=10 2>/dev/null; " +
+            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_upload}' -X POST --data-binary @/tmp/mm_up.bin 'https://speed.cloudflare.com/__up' 2>/dev/null; " +
+            "rm -f /tmp/mm_up.bin"
+        )) ?? ""
+        speedUp = Double(uOut.trimmingCharacters(in: .whitespaces)).map { $0 * 8 / 1_000_000 }
+        speedPhase = ""
     }
 
     private func probe(_ iface: String) async {

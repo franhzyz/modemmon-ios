@@ -983,6 +983,30 @@ struct RouterService {
         _ = try await exec("reboot", allowDangerous: true)
     }
 
+    // MARK: - Спидтест (через каналы роутера)
+
+    /// Скачивание с Cloudflare: возвращает Мбит/с (speed_download curl).
+    func speedTestDownload(iface: String?) async throws -> Double {
+        let bind = iface.map { "--interface \($0.shellQ) " } ?? ""
+        let out = try await execText(
+            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_download}' " +
+            "'https://speed.cloudflare.com/__down?bytes=50000000' 2>/dev/null"
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Double(out) ?? 0) * 8 / 1_000_000
+    }
+
+    /// Отдача на Cloudflare: 10 МБ через POST, возвращает Мбит/с.
+    func speedTestUpload(iface: String?) async throws -> Double {
+        let bind = iface.map { "--interface \($0.shellQ) " } ?? ""
+        let out = try await execText(
+            "dd if=/dev/zero of=/tmp/mm_up.bin bs=1M count=10 2>/dev/null; " +
+            "curl -s -o /dev/null \(bind)--max-time 12 -w '%{speed_upload}' -X POST " +
+            "--data-binary @/tmp/mm_up.bin 'https://speed.cloudflare.com/__up' 2>/dev/null; " +
+            "rm -f /tmp/mm_up.bin"
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Double(out) ?? 0) * 8 / 1_000_000
+    }
+
     // MARK: - Медвемодем: устройства
 
     struct ModemDevice: Identifiable {
