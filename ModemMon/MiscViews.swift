@@ -559,24 +559,31 @@ struct DiagnosticsView: View {
             "uurl=\"$(echo \"$j\" | grep -o 'https://[^\"]*upload[^\"]*' | head -1)\"; " +
             "purl=\"$(echo \"$j\" | grep -o 'https://[^\"]*/ping[^\"]*' | head -1)\"; " +
             "if [ -z \"$durl\" ]; then echo err > /tmp/mm_speed_result; exit 0; fi; " +
-            "res() { for dns in 77.88.8.8 1.1.1.1 8.8.8.8; do " +
-            "r=\"$(nslookup \"$1\" \"$dns\" 2>/dev/null | awk '/Address/{print $NF}' | " +
+            // res(): настоящий IPv4 — nslookup, при неудаче DoH 1.1.1.1 (DNS на роутере бывает нестабилен)
+            "res() { r=\"$(nslookup \"$1\" 77.88.8.8 2>/dev/null | awk '/Address/{print $NF}' | " +
             "grep -E '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$' | head -1)\"; " +
-            "[ -n \"$r\" ] && { echo \"$r\"; return; }; done; }; " +
+            "[ -n \"$r\" ] && { echo \"$r\"; return; }; " +
+            "r=\"$(curl -s -m 6 \"https://1.1.1.1/dns-query?name=$1&type=A\" -H 'accept: application/dns-json' | " +
+            "grep -o '\"data\":\"[0-9.]*\"' | head -1 | cut -d'\"' -f4)\"; " +
+            "[ -n \"$r\" ] && { echo \"$r\"; return; }; }; " +
             "dhost=\"$(echo \"$durl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
             "uhost=\"$(echo \"$uurl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
             "phost=\"$(echo \"$purl\" | sed -e 's|https://||' -e 's|/.*||')\"; " +
             "dip=\"$(res \"$dhost\")\"; uip=\"$(res \"$uhost\")\"; pip=\"$(res \"$phost\")\"; " +
-            "d=\"$(curl -s -o /dev/null --max-time 10 \(bind)" +
-            "--resolve \"$dhost:443:$dip\" -w '%{speed_download}' \"$durl&rid=mm$(date +%s)\" 2>/dev/null)\"; " +
+            // --resolve только если IP получен; иначе обычный путь (fake-ip через Clash)
+            "dargs=\"\"; [ -n \"$dip\" ] && dargs=\"--resolve $dhost:443:$dip\"; " +
+            "uargs=\"\"; [ -n \"$uip\" ] && uargs=\"--resolve $uhost:443:$uip\"; " +
+            "pargs=\"\"; [ -n \"$pip\" ] && pargs=\"--resolve $phost:443:$pip\"; " +
+            "d=\"$(curl -s -o /dev/null --max-time 10 \(bind)$dargs " +
+            "-w '%{speed_download}' \"$durl&rid=mm$(date +%s)\" 2>/dev/null)\"; " +
             "echo up > /tmp/mm_speed_phase; " +
-            "dd if=/dev/zero of=/tmp/mm_up.bin bs=1M count=10 2>/dev/null; " +
-            "u=\"$(curl -s -o /dev/null --max-time 15 \(bind)" +
-            "--resolve \"$uhost:443:$uip\" -X POST -H 'Content-Type: application/octet-stream' " +
+            "head -c 10485760 /dev/zero > /tmp/mm_up.bin 2>/dev/null; " +
+            "u=\"$(curl -s -o /dev/null --max-time 15 \(bind)$uargs " +
+            "-X POST -H 'Content-Type: application/octet-stream' " +
             "--data-binary @/tmp/mm_up.bin -w '%{speed_upload}' \"$uurl&rid=mm$(date +%s)\" 2>/dev/null)\"; " +
             "rm -f /tmp/mm_up.bin; echo ping > /tmp/mm_speed_phase; " +
-            "p=\"$(curl -s -o /dev/null -m 3 \(bind)" +
-            "--resolve \"$phost:443:$pip\" -w '%{time_starttransfer}' \"$purl&rid=mm1\" 2>/dev/null)\"; " +
+            "p=\"$(curl -s -o /dev/null -m 3 \(bind)$pargs " +
+            "-w '%{time_starttransfer}' \"$purl&rid=mm1\" 2>/dev/null)\"; " +
             "echo \"$d $u $p\" > /tmp/mm_speed_result; " +
             "} >/dev/null 2>&1 </dev/null & echo started"
         do {
