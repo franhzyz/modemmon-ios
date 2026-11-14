@@ -123,6 +123,14 @@ struct NeighborCell: Identifiable {
     var band: String = ""
 }
 
+struct ModemAntenna: Identifiable {
+    var chain: Int
+    var rsrp: Double?
+    var power: Double?
+    var tuned: Bool
+    var id: Int { chain }
+}
+
 struct Sms: Identifiable {
     var id: String
     var number: String = ""
@@ -181,6 +189,15 @@ struct ModemSnapshot {
     var online: Bool?
     var reachLatencyMs: Double?
     var bearerIface: String?
+    var bearerApn: String = ""
+    var bearerIPv4: String = ""
+    var bearerMtu: Int?
+
+    var trafficDl: Int64?
+    var trafficUl: Int64?
+    var connectTimeSec: Int?
+
+    var antennas: [ModemAntenna] = []
 
     static let empty = ModemSnapshot()
 
@@ -238,6 +255,23 @@ struct ModemSnapshot {
                          band: c.string("band") ?? "")
         }
         activeBands = band.isEmpty ? [] : [band]
+
+        let b = telemetry.sub("bearer")
+        bearerApn = b?.string("apn") ?? ""
+        bearerIPv4 = b?.string("ipv4_address") ?? ""
+        bearerMtu = b?.int("ipv4_mtu")
+
+        let tr = telemetry.sub("traffic")
+        trafficDl = tr?.num("total_dl").map { Int64($0) }
+        trafficUl = tr?.num("total_ul").map { Int64($0) }
+        connectTimeSec = tr?.int("connect_time")
+
+        antennas = telemetry.list("antennas").map { a in
+            ModemAntenna(chain: a.int("chain") ?? 0,
+                         rsrp: a.num("rsrp"),
+                         power: a.num("power"),
+                         tuned: a.bool("tuned"))
+        }
         ussdStatus = ""
     }
 

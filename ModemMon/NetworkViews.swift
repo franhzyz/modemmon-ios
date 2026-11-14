@@ -424,6 +424,8 @@ struct WifiView: View {
     @State private var devices: [String] = []
     @State private var loaded = false
     @State private var showScan = false
+    @State private var channels: [RouterService.WifiChannel] = []
+    @State private var surveyDevice: String = ""
 
     var body: some View {
         List {
@@ -437,6 +439,31 @@ struct WifiView: View {
                         Button("скан") { showScan = true }
                             .buttonStyle(.borderless)
                             .font(.caption)
+                        Button("каналы") {
+                            surveyDevice = d
+                            Task { await loadChannels() }
+                        }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                }
+            }
+            if !channels.isEmpty {
+                Section("Каналы \(surveyDevice) — загрузка") {
+                    ForEach(channels) { c in
+                        HStack {
+                            Text("ch \(c.channel)").font(.system(.subheadline, design: .monospaced))
+                            Text("\(c.freq) МГц").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if let p = c.busyPercent {
+                                ProgressRow(label: "", value: p / 100,
+                                            caption: String(format: "%.0f%%", p),
+                                            color: p > 60 ? .red : (p > 30 ? .orange : .green))
+                                    .frame(width: 120)
+                            } else {
+                                Text("—").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
@@ -487,6 +514,11 @@ struct WifiView: View {
         .sheet(isPresented: $showScan) {
             NavigationStack { WifiScanView(devices: devices) }
         }
+    }
+
+    private func loadChannels() async {
+        guard !surveyDevice.isEmpty else { return }
+        channels = await app.run { svc in try await svc.wifiSurvey(device: surveyDevice) } ?? []
     }
 
     private func load() async {

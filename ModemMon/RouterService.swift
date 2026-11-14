@@ -983,6 +983,61 @@ struct RouterService {
         _ = try await exec("reboot", allowDangerous: true)
     }
 
+    // MARK: - Медвемодем: устройства
+
+    struct ModemDevice: Identifiable {
+        var id: String
+        var device: String
+    }
+
+    func modemDevices() async throws -> [ModemDevice] {
+        let d = try await ubus.callData("medvemodem", "devices")
+        return d.list("devices").map { dev in
+            ModemDevice(id: dev.string("device_id") ?? dev.string("attachment_id") ?? "?",
+                        device: dev.string("device") ?? "")
+        }
+    }
+
+    // MARK: - Wi-Fi: загрузка каналов (survey)
+
+    struct WifiChannel: Identifiable {
+        var channel: Int
+        var freq: Int
+        var busyPercent: Double?
+        var id: Int { channel }
+    }
+
+    func wifiSurvey(device: String) async throws -> [WifiChannel] {
+        let out = try await execText("iw dev \(device.shellQ) survey dump 2>/dev/null")
+        guard !out.isEmpty else { return [] }
+        // блоки: freq/channel, active time, busy time
+        var res: [WifiChannel] = []
+        var cur: (freq: Int, channel: Int, active: Double, busy: Double)? = nil
+        for raw in out.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("freq:") || line.hasPrefix("frequency:") {
+                if let c = cur { res.append(WifiChannel(channel: c.channel, freq: c.freq,
+                                                        busyPercent: c.active > 0 ? min(100, c.busy / c.active * 100) : nil)) }
+                let f = Int(line.split(separator: ":").last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+                cur = (freq: f, channel: 0, active: 0, busy: 0)
+            } else if line.hasPrefix("channel:") {
+                let ch = line.split(separator: ":").last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+                cur?.channel = Int(Double(ch) ?? 0)
+            } else if line.hasPrefix("active time:") {
+                let v = line.split(separator: ":").last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "0"
+                cur?.active = Double(v.split(separator: " ").first ?? "0") ?? 0
+            } else if line.hasPrefix("busy time:") {
+                let v = line.split(separator: ":").last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "0"
+                cur?.busy = Double(v.split(separator: " ").first ?? "0") ?? 0
+            }
+        }
+        if let c = cur {
+            res.append(WifiChannel(channel: c.channel, freq: c.freq,
+                                    busyPercent: c.active > 0 ? min(100, c.busy / c.active * 100) : nil))
+        }
+        return res.filter { $0.channel > 0 }
+    }
+
     // MARK: - Forkop (sing-box менеджер)
 
     struct ForkopStatus {

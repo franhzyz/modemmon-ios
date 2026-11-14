@@ -16,12 +16,79 @@ struct OverviewView: View {
                 cellCard(m)
                 tempCard(m)
                 simCard(m)
+                antennasCard(m)
+                bearerCard(m)
+                trafficCard(m)
+                devicesCard
             } else {
                 Section { ProgressView("Ждём данные…").frame(maxWidth: .infinity) }
             }
         }
         .navigationTitle("Обзор модема")
         .refreshable { await app.checkUplink() }
+        .onAppear { if modemDevices.isEmpty && app.conn != .demo { Task { await loadDevices() } } }
+    }
+
+    @State private var modemDevices: [RouterService.ModemDevice] = []
+
+    private func loadDevices() async {
+        modemDevices = await app.run { svc in try await svc.modemDevices() } ?? []
+    }
+
+    private var devicesCard: some View {
+        Section("Устройства медвемодема") {
+            if modemDevices.isEmpty {
+                Text("—").font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(modemDevices) { d in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(d.id).font(.caption.monospaced())
+                    if !d.device.isEmpty {
+                        Text("device: \(d.device)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func antennasCard(_ m: ModemSnapshot) -> some View {
+        Section("Антенны") {
+            if m.antennas.isEmpty {
+                Text("—").foregroundStyle(.secondary)
+            }
+            ForEach(m.antennas) { a in
+                HStack {
+                    Text("Антенна \(a.chain + 1)").font(.subheadline)
+                    if !a.tuned { MmBadge(text: "не настроена", tone: .warn) }
+                    Spacer()
+                    Text(a.rsrp.map { String(format: "%.1f dBm", $0) } ?? "—")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(rsrpColor(a.rsrp))
+                    Text(a.power.map { String(format: "%.1f dBm", $0) } ?? "")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func bearerCard(_ m: ModemSnapshot) -> some View {
+        Section("Bearer (подключение к сети)") {
+            KVRow(key: "APN", value: m.bearerApn.isEmpty ? "—" : m.bearerApn)
+            KVRow(key: "IPv4", value: m.bearerIPv4.isEmpty ? "—" : m.bearerIPv4)
+            KVRow(key: "MTU", value: m.bearerMtu.map(String.init) ?? "—")
+            KVRow(key: "Интерфейс", value: m.bearerIface.isEmpty ? "—" : m.bearerIface)
+        }
+    }
+
+    private func trafficCard(_ m: ModemSnapshot) -> some View {
+        Section("Трафик сессии") {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                StatTile(title: "Всего ↓", value: Fmt.bytes(m.trafficDl))
+                StatTile(title: "Всего ↑", value: Fmt.bytes(m.trafficUl))
+                StatTile(title: "Сессия", value: m.connectTimeSec.map(Fmt.uptime) ?? "—")
+            }
+        }
     }
 
     private func statusCard(_ m: ModemSnapshot) -> some View {
