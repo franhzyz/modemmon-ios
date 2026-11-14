@@ -73,11 +73,12 @@ struct OverviewView: View {
     }
 
     private func bearerCard(_ m: ModemSnapshot) -> some View {
-        Section("Bearer (подключение к сети)") {
+        let bi = m.bearerIface ?? ""
+        return Section("Bearer (подключение к сети)") {
             KVRow(key: "APN", value: m.bearerApn.isEmpty ? "—" : m.bearerApn)
             KVRow(key: "IPv4", value: m.bearerIPv4.isEmpty ? "—" : m.bearerIPv4)
             KVRow(key: "MTU", value: m.bearerMtu.map(String.init) ?? "—")
-            KVRow(key: "Интерфейс", value: m.bearerIface.isEmpty ? "—" : m.bearerIface)
+            KVRow(key: "Интерфейс", value: bi.isEmpty ? "—" : bi)
         }
     }
 
