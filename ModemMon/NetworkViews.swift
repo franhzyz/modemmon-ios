@@ -6,24 +6,16 @@ struct NetworkView: View {
     @EnvironmentObject var app: AppState
     @State private var ifaces: [Iface]?
     @State private var leasesList: [Lease]?
-    @State private var channels: [(Int, String)] = [] // (метрика, устройство)
-    @State private var channelsLoaded = false
-    @State private var switchingDev: String?
-    @State private var channelsError: String?
 
     var body: some View {
         List {
             uplinkCard
-            channelsCard
             ifacesCard
             if let l = leasesList { leasesCard(l) }
         }
         .navigationTitle("Сеть")
-        .refreshable { await load(); await loadChannels() }
-        .onAppear {
-            if ifaces == nil { Task { await load() } }
-            if !channelsLoaded { Task { await loadChannels() } }
-        }
+        .refreshable { await load() }
+        .onAppear { if ifaces == nil { Task { await load() } } }
     }
 
     private var uplinkCard: some View {
@@ -49,114 +41,6 @@ struct NetworkView: View {
         }
     }
 
-    // MARK: - Каналы (модем / резерв)
-
-    /// Переключение основного канала: uci-метрики (90/110) + reload.
-    /// Демон medvemodem следует за метриками, автопереключение сохраняется.
-    private var channelsCard: some View {
-        Section("Каналы") {
-            if !channelsLoaded && switchingDev == nil {
-                Text("Загрузка…").foregroundStyle(.secondary)
-            }
-            ForEach(Array(channels.enumerated()), id: \.offset) { idx, ch in
-                HStack {
-                    Text(Self.devLabel(ch.1))
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(idx == 0 ? "основной" : "резерв")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(Capsule())
-                        .foregroundStyle(idx == 0 ? Color.green : Color.secondary)
-                    if idx != 0 {
-                        Button {
-                            Task { await switchChannel(ch.1) }
-                        } label: {
-                            Text("Сделать основным")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(switchingDev != nil)
-                    }
-                }
-            }
-            if let sw = switchingDev {
-                HStack {
-                    ProgressView().padding(.trailing, 6)
-                    Text("Переключаю на \(Self.devLabel(sw))… (~20-40 с)")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let e = channelsError {
-                Text(e).font(.caption).foregroundStyle(.red)
-            }
-            Text("Переключение меняет приоритет каналов (метрики). Автопереключение " +
-                 "при пропадании интернета продолжает работать; канал при смене перезванивает.")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private func loadChannels() async {
-        guard let svc = app.service else { return }
-        let out = (try? await svc.execText(
-            "ip route show default | while read -r line; do " +
-            "dev=\"$(echo \"$line\" | sed -n \"s/.* dev \\([^ ]*\\).*/\\1/p\")\"; " +
-            "met=\"$(echo \"$line\" | sed -n \"s/.* metric \\([0-9]*\\).*/\\1/p\")\"; " +
-            "echo \"${met:-0} $dev\"; done | sort -n; exit 0"
-        )) ?? ""
-        let list = out
-            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
-            .compactMap { line -> (Int, String)? in
-                let p = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-                guard let m = p.first.flatMap({ Int($0) }), let d = p.dropFirst().first else { return nil }
-                return (m, d)
-            }
-            .sorted { $0.0 < $1.0 }
-        if !list.isEmpty {
-            channels = list
-            channelsLoaded = true
-        }
-    }
-
-    private func switchChannel(_ dev: String) async {
-        guard let svc = app.service, switchingDev == nil else { return }
-        switchingDev = dev
-        channelsError = nil
-        let safe = dev.filter { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-".contains($0) }
-        let script =
-            "TARGET=\(safe); j=$(ubus call network.interface dump); " +
-            "for d in $(ip route show default | sed -n \"s/.* dev \\([^ ]*\\).*/\\1/p\" | sort -u); do " +
-            "s=$(jsonfilter -s \"$j\" -e \"@.interface[@.l3_device=\\\"$d\\\"].interface\" | head -1); " +
-            "[ -n \"$s\" ] || continue; " +
-            "if [ \"$d\" = \"$TARGET\" ]; then uci set network.$s.metric=\"90\"; " +
-            "else uci set network.$s.metric=\"110\"; fi; done; " +
-            "uci commit network; /etc/init.d/network reload >/dev/null 2>&1; echo switched"
-        do {
-            _ = try await svc.execText(script)
-        } catch {
-            channelsError = error.localizedDescription
-            switchingDev = nil
-            return
-        }
-        for _ in 0..<30 {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            await loadChannels()
-            if channels.first?.1 == dev {
-                switchingDev = nil
-                return
-            }
-        }
-        channelsError = "Переключение затянулось — проверь статус каналов"
-        switchingDev = nil
-    }
-
-    private static func devLabel(_ dev: String) -> String {
-        if dev.hasPrefix("wwan") || dev.hasPrefix("qmi") { return "Модем (\(dev))" }
-        if dev.hasPrefix("usb") || dev.hasPrefix("pppoe") || dev.contains("wan") { return "Кабель (\(dev))" }
-        return dev
-    }
 
     private var ifacesCard: some View {
         Section("Интерфейсы") {

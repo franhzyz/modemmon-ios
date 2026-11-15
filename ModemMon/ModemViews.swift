@@ -5,11 +5,16 @@ import Charts
 
 struct OverviewView: View {
     @EnvironmentObject var app: AppState
+    @State private var channels: [(Int, String)] = [] // (метрика, устройство)
+    @State private var channelsLoaded = false
+    @State private var switchingDev: String?
+    @State private var channelsError: String?
 
     var body: some View {
         List {
             if let m = app.modem {
                 statusCard(m)
+                modemSwitchCard
                 signalCard(m)
                 qualityCard(m)
                 if let s = app.sys { sysCard(s) }
@@ -25,11 +30,124 @@ struct OverviewView: View {
             }
         }
         .navigationTitle("Обзор модема")
-        .refreshable { await app.checkUplink() }
-        .onAppear { if modemDevices.isEmpty && app.conn != .demo { Task { await loadDevices() } } }
+        .refreshable { await app.checkUplink(); await loadChannels() }
+        .onAppear {
+            if modemDevices.isEmpty && app.conn != .demo { Task { await loadDevices() } }
+            if !channelsLoaded { Task { await loadChannels() } }
+        }
     }
 
     @State private var modemDevices: [RouterService.ModemDevice] = []
+
+    // MARK: - Переключение между модемами
+
+    /// Какой канал держит маршрут по умолчанию (основной/резерв).
+    /// Переключение: uci-метрики (90/110) + reload; демон medvemodem следует.
+    private var modemSwitchCard: some View {
+        Section("Переключение модемов") {
+            if !channelsLoaded && switchingDev == nil {
+                Text("Загрузка…").foregroundStyle(.secondary)
+            }
+            ForEach(Array(channels.enumerated()), id: \.offset) { idx, ch in
+                HStack {
+                    Text(Self.devLabel(ch.1))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(idx == 0 ? "основной" : "резерв")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Capsule())
+                        .foregroundStyle(idx == 0 ? Color.green : Color.secondary)
+                    if idx != 0 {
+                        Button {
+                            Task { await switchChannel(ch.1) }
+                        } label: {
+                            Text("Сделать основным")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(switchingDev != nil)
+                    }
+                }
+            }
+            if let sw = switchingDev {
+                HStack {
+                    ProgressView().padding(.trailing, 6)
+                    Text("Переключаю на \(Self.devLabel(sw))… (~20-40 с)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let e = channelsError {
+                Text(e).font(.caption).foregroundStyle(.red)
+            }
+            Text("Переключение меняет приоритет каналов (метрики). Автопереключение " +
+                 "при пропадании интернета продолжает работать; модем при смене перезванивает.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadChannels() async {
+        guard let svc = app.service else { return }
+        let out = (try? await svc.execText(
+            "ip route show default | while read -r line; do " +
+            "dev=\"$(echo \"$line\" | sed -n \"s/.* dev \\([^ ]*\\).*/\\1/p\")\"; " +
+            "met=\"$(echo \"$line\" | sed -n \"s/.* metric \\([0-9]*\\).*/\\1/p\")\"; " +
+            "echo \"${met:-0} $dev\"; done | sort -n; exit 0"
+        )) ?? ""
+        let list = out
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .compactMap { line -> (Int, String)? in
+                let p = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                guard let m = p.first.flatMap({ Int($0) }), let d = p.dropFirst().first else { return nil }
+                return (m, d)
+            }
+            .sorted { $0.0 < $1.0 }
+        if !list.isEmpty {
+            channels = list
+            channelsLoaded = true
+        }
+    }
+
+    private func switchChannel(_ dev: String) async {
+        guard let svc = app.service, switchingDev == nil else { return }
+        switchingDev = dev
+        channelsError = nil
+        let safe = dev.filter { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-".contains($0) }
+        let script =
+            "TARGET=\(safe); j=$(ubus call network.interface dump); " +
+            "for d in $(ip route show default | sed -n \"s/.* dev \\([^ ]*\\).*/\\1/p\" | sort -u); do " +
+            "s=$(jsonfilter -s \"$j\" -e \"@.interface[@.l3_device=\\\"$d\\\"].interface\" | head -1); " +
+            "[ -n \"$s\" ] || continue; " +
+            "if [ \"$d\" = \"$TARGET\" ]; then uci set network.$s.metric=\"90\"; " +
+            "else uci set network.$s.metric=\"110\"; fi; done; " +
+            "uci commit network; /etc/init.d/network reload >/dev/null 2>&1; echo switched"
+        do {
+            _ = try await svc.execText(script)
+        } catch {
+            channelsError = error.localizedDescription
+            switchingDev = nil
+            return
+        }
+        for _ in 0..<30 {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await loadChannels()
+            if channels.first?.1 == dev {
+                switchingDev = nil
+                return
+            }
+        }
+        channelsError = "Переключение затянулось — проверь статус каналов"
+        switchingDev = nil
+    }
+
+    private static func devLabel(_ dev: String) -> String {
+        if dev.hasPrefix("wwan") || dev.hasPrefix("qmi") { return "Модем LTE (\(dev))" }
+        if dev.hasPrefix("usb") { return "USB-модем (\(dev))" }
+        if dev.hasPrefix("pppoe") || dev.contains("wan") || dev.hasPrefix("eth") { return "Кабель (\(dev))" }
+        return dev
+    }
 
     private func loadDevices() async {
         modemDevices = await app.run { svc in try await svc.modemDevices() } ?? []
