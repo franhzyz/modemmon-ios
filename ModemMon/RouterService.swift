@@ -706,6 +706,17 @@ struct RouterService {
             guard kv.count == 2, let idx = Int(kv[0]) else { continue }
             cores.append(CpuCore(id: idx, freqMhz: Int(kv[1]) ?? nil, load: nil))
         }
+        if cores.isEmpty {
+            // Виртуалка (QEMU и т.п.) без cpufreq: текущая частота из /proc/cpuinfo
+            let ci = (try? await execText(
+                "awk '/^cpu MHz/{printf \"%d\\n\", $4}' /proc/cpuinfo"
+            )) ?? ""
+            for line in ci.split(separator: "\n") {
+                if let m = Int(line.trimmingCharacters(in: .whitespaces)), m > 0 {
+                    cores.append(CpuCore(id: cores.count, freqMhz: m, load: nil))
+                }
+            }
+        }
         o.cores = cores
         return o
     }
