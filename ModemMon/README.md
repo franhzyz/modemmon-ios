@@ -9,6 +9,12 @@ iOS-приложение (SwiftUI) для управления OpenWrt-роут�
 [https://github.com/Medvedolog/medvemodem](https://github.com/Medvedolog/medvemodem)
 (medvemodem, luci-app-forkop, sing-box-forkop и связанные пакеты).
 
+## Скриншоты
+
+| Меню | Обзор модема | Переключение модемов |
+|---|---|---|
+| ![Меню](docs/screenshots/menu.png) | ![Обзор](docs/screenshots/overview.png) | ![Переключение](docs/screenshots/switching.png) |
+
 ## Возможности
 
 - Обзор модема: сигнал, антенны, bearer, трафик, телеметрия (schema v2)
