@@ -314,6 +314,9 @@ struct WolView: View {
     @State private var newName = ""
     @State private var newMac = ""
     @State private var newIface = "br-lan"
+    @State private var clients: [(String, String, String?)] = [] // mac, ip, host
+    @State private var showClients = false
+    @State private var clientsBusy = false
 
     var body: some View {
         List {
@@ -325,6 +328,37 @@ struct WolView: View {
                         Label(L("Установить etherwake на роутер", "Install etherwake on the router"), systemImage: "square.and.arrow.down")
                     }
                 }
+            }
+            Section {
+                Button {
+                    showClients.toggle()
+                    if clients.isEmpty && !clientsBusy { Task { await loadClients() } }
+                } label: {
+                    Label(L("Выбрать клиента", "Pick a client"), systemImage: "person.crop.circle")
+                }
+                if showClients {
+                    if clientsBusy { ProgressView().padding(.vertical, 4) }
+                    if clients.isEmpty && !clientsBusy {
+                        Text(L("нет данных", "no data")).foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(clients.enumerated()), id: \.offset) { _, c in
+                        Button {
+                            let tgt = WolTarget(name: c.2 ?? c.1, mac: c.0.uppercased(), iface: newIface)
+                            if !targets.contains(where: { $0.mac.uppercased() == tgt.mac.uppercased() }) {
+                                targets.append(tgt); saveTargets()
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.2 ?? c.1).font(.subheadline)
+                                Text("\(c.1) · \(c.0)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text(L("Клиенты (DHCP / ARP)", "Clients (DHCP / ARP)"))
+            } footer: {
+                Text(L("Нажми на клиента — он добавится в цели Wake-on-LAN.", "Tap a client to add it to Wake-on-LAN targets."))
             }
             Section(L("Цели", "Targets")) {
                 if targets.isEmpty { Text(L("Добавь компьютер по MAC-адресу", "Add a computer by MAC address")).foregroundStyle(.secondary) }
@@ -387,6 +421,36 @@ struct WolView: View {
 
     private func saveTargets() {
         if let d = try? JSONEncoder().encode(targets) { UserDefaults.standard.set(d, forKey: "mm.wolTargets") }
+    }
+
+    private func loadClients() async {
+        clientsBusy = true
+        defer { clientsBusy = false }
+        if app.conn == .demo {
+            clients = [("AA:BB:CC:DD:EE:01", "192.168.2.50", "demo-pc")]
+            return
+        }
+        let script = "echo \"[leases]\"; cat /tmp/dhcp.leases 2>/dev/null | awk '{print $2\" \"$3\" \"$4}'; echo \"[arp]\"; ip neigh show 2>/dev/null | awk '$0 ~ /lladdr/ {ip=$1; dev=$3; mac=\"\"; for(i=1;i<=NF;i++) if($i==\"lladdr\") mac=$(i+1); print mac\" \"$1; exit 0"
+        let out = await app.run({ svc in try? await svc.execText(script) }) ?? ""
+        var leases: [String: (String, String)] = [:]
+        var arp: [String: Set<String>] = [:]
+        var sec = ""
+        for line in out.split(separator: "\n") {
+            let l = line.trimmingCharacters(in: .whitespaces)
+            if l == "[leases]" { sec = "leases"; continue }
+            if l == "[arp]" { sec = "arp"; continue }
+            let p = l.split(separator: " ").map(String.init)
+            guard p.count >= 2 else { continue }
+            if sec == "leases" { leases[p[0].uppercased()] = (p[1], p.count > 2 ? p[2] : "") }
+            if sec == "arp" { arp[p[0].uppercased(), default: []].insert(p[1]) }
+        }
+        var rows: [(String, String, String?)] = []
+        for m in Array(Set(leases.keys).union(arp.keys)).sorted() {
+            var ips = Array(arp[m] ?? [])
+            if let li = leases[m]?.0, !li.isEmpty { ips.append(li) }
+            rows.append((m, ips.filter { !$0.isEmpty }.joined(separator: ", "), leases[m]?.1.isEmpty == false ? leases[m]!.1 : nil))
+        }
+        clients = rows.sorted { ($0.2 ?? $0.1) < ($1.2 ?? $1.1) }
     }
 
     private func check() async {
