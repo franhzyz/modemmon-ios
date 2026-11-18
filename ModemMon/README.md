@@ -9,6 +9,24 @@ iOS-приложение (SwiftUI) для управления OpenWrt-роут�
 [https://github.com/Medvedolog/medvemodem](https://github.com/Medvedolog/medvemodem)
 (medvemodem, luci-app-forkop, sing-box-forkop и связанные пакеты).
 
+## Установка пакетов на роутер
+
+Скрипт для роутера: [`openwrt/install-modemmon.sh`](openwrt/install-modemmon.sh) —
+сам определяет архитектуру и версию OpenWrt, скачивает и ставит пакеты.
+Запуск на роутере по SSH:
+
+```sh
+sh install-modemmon.sh
+```
+
+Готовые пакеты (aarch64_cortex-a53 / aarch64_generic / x86_64, OpenWrt 24.10 и 25.12) —
+в [релизах Medvedolog/medvemodem](https://github.com/Medvedolog/medvemodem/releases)
+и прикреплены к релизам этого репозитория.
+
+## Языки / Languages
+
+Приложение двуязычное: русский и английский. Переключатель — Настройки → «Язык / Language».
+
 ## Скриншоты
 
 | Меню | Обзор модема | Переключение модемов |
