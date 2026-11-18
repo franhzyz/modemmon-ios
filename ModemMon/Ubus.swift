@@ -11,12 +11,12 @@ enum MmError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .badURL(let u): return "Некорректный адрес: \(u)"
-        case .http(let c): return "HTTP-ошибка \(c)"
-        case .badReply(let d): return "Странный ответ от роутера: \(d)"
+        case .badURL(let u): return L("Некорректный адрес: \(u)", "Invalid address: \(u)")
+        case .http(let c): return L("HTTP-ошибка \(c)", "HTTP error \(c)")
+        case .badReply(let d): return L("Странный ответ от роутера: \(d)", "Odd response from the router: \(d)")
         case .ubus(let c): return MmError.ubusText(c)
-        case .sessionExpired: return "Сессия истекла"
-        case .danger(let c): return "Заблокировано безопасным режимом: \(c)"
+        case .sessionExpired: return L("Сессия истекла", "Session expired")
+        case .danger(let c): return L("Заблокировано безопасным режимом: \(c)", "Blocked by safe mode: \(c)")
         case .backend(let m): return m
         }
     }
@@ -24,16 +24,16 @@ enum MmError: Error, LocalizedError {
     static func ubusText(_ code: Int) -> String {
         switch code {
         case 0: return "OK"
-        case 1: return "ubus: неверная команда"
-        case 2: return "ubus: неверный аргумент"
-        case 3: return "ubus: метод не найден"
-        case 4: return "ubus: не найдено"
-        case 5: return "ubus: нет данных"
-        case 6: return "ubus: нет прав (сессия истекла?)"
-        case 7: return "ubus: таймаут"
-        case 8: return "ubus: не поддерживается"
-        case 10: return "ubus: соединение не удалось"
-        default: return "ubus: ошибка \(code)"
+        case 1: return L("ubus: неверная команда", "ubus: invalid command")
+        case 2: return L("ubus: неверный аргумент", "ubus: invalid argument")
+        case 3: return L("ubus: метод не найден", "ubus: method not found")
+        case 4: return L("ubus: не найдено", "ubus: not found")
+        case 5: return L("ubus: нет данных", "ubus: no data")
+        case 6: return L("ubus: нет прав (сессия истекла?)", "ubus: permission denied (session expired?)")
+        case 7: return L("ubus: таймаут", "ubus: timeout")
+        case 8: return L("ubus: не поддерживается", "ubus: not supported")
+        case 10: return L("ubus: соединение не удалось", "ubus: connection failed")
+        default: return L("ubus: ошибка \(code)", "ubus: error \(code)")
         }
     }
 }
@@ -85,7 +85,7 @@ actor UbusClient {
         do {
             (data, resp) = try await http.data(for: req)
         } catch {
-            throw MmError.backend("Нет связи с роутером: \(error.localizedDescription)")
+            throw MmError.backend(L("Нет связи с роутером: \(error.localizedDescription)", "No connection to the router: \(error.localizedDescription)"))
         }
         if let h = resp as? HTTPURLResponse, h.statusCode >= 400 {
             throw MmError.http(h.statusCode)
@@ -96,7 +96,7 @@ actor UbusClient {
             throw MmError.badReply(s)
         }
         guard let status = (result.first as? NSNumber)?.intValue else {
-            throw MmError.badReply("result без статуса")
+            throw MmError.badReply(L("result без статуса", "result without status"))
         }
         if status != 0 {
             if status == 6 { throw MmError.sessionExpired }
@@ -110,7 +110,7 @@ actor UbusClient {
                                    ["username": user, "password": pass, "timeout": 21_600]])
         guard let d = data.first as? [String: Any],
               let token = d["ubus_rpc_session"] as? String else {
-            throw MmError.backend("Логин не удался: нет сессии (проверьте логин/пароль)")
+            throw MmError.backend(L("Логин не удался: нет сессии (проверьте логин/пароль)", "Login failed: no session (check login/password)"))
         }
         session = token
         self.user = user
@@ -158,7 +158,7 @@ actor UbusClient {
     func fileRead(_ path: String) async throws -> Data {
         let d = try await callData("file", "read", ["path": path])
         guard let b64 = d.string("data"), let raw = Data(base64Encoded: b64) else {
-            throw MmError.backend("Не удалось прочитать \(path)")
+            throw MmError.backend(L("Не удалось прочитать \(path)", "Failed to read \(path)"))
         }
         return raw
     }
@@ -208,7 +208,7 @@ struct HttpJson {
         do {
             (data, resp) = try await URLSession.shared.data(for: req)
         } catch {
-            throw MmError.backend("Нет связи с роутером: \(error.localizedDescription)")
+            throw MmError.backend(L("Нет связи с роутером: \(error.localizedDescription)", "No connection to the router: \(error.localizedDescription)"))
         }
         if let h = resp as? HTTPURLResponse, h.statusCode >= 400 {
             throw MmError.http(h.statusCode)

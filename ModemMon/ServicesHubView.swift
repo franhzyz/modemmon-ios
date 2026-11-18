@@ -13,22 +13,22 @@ struct ServicesHubView: View {
     var body: some View {
         List {
             if let forkop = services.first(where: { $0.name == "forkop" }) {
-                Section("Прокси") {
+                Section(L("Прокси", "Proxy")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Форкоп (sing-box)").font(.subheadline.weight(.semibold))
+                            Text(L("Форкоп (sing-box)", "Forkop (sing-box)")).font(.subheadline.weight(.semibold))
                             badges(forkop)
                         }
                         Spacer()
                         NavigationLink { ForkopView() } label: {
-                            Text("открыть").font(.caption)
+                            Text(L("открыть", "open")).font(.caption)
                         }
                         .buttonStyle(.borderless)
                     }
                 }
             }
 
-            Section("Ключевые службы") {
+            Section(L("Ключевые службы", "Key services")) {
                 if services.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(services.filter { Self.pinned.contains($0.name) }) { s in
                     ServiceRowView(s: s, busyName: busyName) { a in
@@ -37,8 +37,8 @@ struct ServicesHubView: View {
                 }
             }
 
-            Section("Все службы (init.d)") {
-                TextField("Фильтр", text: $filter)
+            Section(L("Все службы (init.d)", "All services (init.d)")) {
+                TextField(L("Фильтр", "Filter"), text: $filter)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 ForEach(services.filter {
@@ -51,7 +51,7 @@ struct ServicesHubView: View {
                 }
             }
         }
-        .navigationTitle("Службы")
+        .navigationTitle(L("Службы", "Services"))
         .refreshable { await load() }
         .onAppear { if services.isEmpty { Task { await load() } } }
     }

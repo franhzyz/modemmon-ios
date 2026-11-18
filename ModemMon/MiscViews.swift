@@ -23,7 +23,7 @@ struct TerminalView: View {
                 } label: {
                     HStack {
                         Spacer()
-                        Label("Установить mmterm на роутер", systemImage: "square.and.arrow.down")
+                        Label(L("Установить mmterm на роутер", "Install mmterm on the router"), systemImage: "square.and.arrow.down")
                         Spacer()
                     }
                 }
@@ -43,7 +43,7 @@ struct TerminalView: View {
                         if term.busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.mini)
-                                Text("выполняется · cwd \(term.cwd)")
+                                Text(L("выполняется · cwd \(term.cwd)", "running · cwd \(term.cwd)"))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -62,7 +62,7 @@ struct TerminalView: View {
             .foregroundStyle(.green)
             Divider()
             HStack(spacing: 8) {
-                TextField("команда (cwd: \(term.cwd))", text: $cmd)
+                TextField(L("команда (cwd: \(term.cwd))", "command (cwd: \(term.cwd))"), text: $cmd)
                     .font(.system(.body, design: .monospaced))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -81,17 +81,17 @@ struct TerminalView: View {
                 Menu {
                     Button {
                         showEditor = true
-                    } label: { Label("Редактор файлов", systemImage: "pencil.and.outline") }
+                    } label: { Label(L("Редактор файлов", "File editor"), systemImage: "pencil.and.outline") }
                     Button(role: .destructive) {
                         term.clear()
-                    } label: { Label("Очистить вывод", systemImage: "trash") }
+                    } label: { Label(L("Очистить вывод", "Clear output"), systemImage: "trash") }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.title3)
                 }
             }
             .padding(10)
         }
-        .navigationTitle("Терминал")
+        .navigationTitle(L("Терминал", "Terminal"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             term.bind(app)
@@ -121,14 +121,14 @@ struct FileEditorView: View {
 
     var body: some View {
         Form {
-            Section("Путь") {
+            Section(L("Путь", "Path")) {
                 TextField("/etc/...", text: $path)
                     .font(.system(.body, design: .monospaced))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button {
                     Task { await load() }
-                } label: { Label("Открыть", systemImage: "doc.text.magnifyingglass") }
+                } label: { Label(L("Открыть", "Open"), systemImage: "doc.text.magnifyingglass") }
             }
             Section("Содержимое \(loadedPath.isEmpty ? "" : "(\(loadedPath))")") {
                 TextEditor(text: $text)
@@ -139,17 +139,17 @@ struct FileEditorView: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    HStack { Spacer(); if busy { ProgressView().padding(.trailing, 8) }; Text("Сохранить (с .bak-копией)").bold(); Spacer() }
+                    HStack { Spacer(); if busy { ProgressView().padding(.trailing, 8) }; Text(L("Сохранить (с .bak-копией)", "Save (with .bak copy)")).bold(); Spacer() }
                 }
                 .disabled(busy || loadedPath.isEmpty)
             } footer: {
-                Text("Перед записью на роутере создаётся резервная копия: <файл>.bak-<timestamp>.")
+                Text(L("Перед записью на роутере создаётся резервная копия: <файл>.bak-<timestamp>.", "Before writing, a backup is created on the router: <file>.bak-<timestamp>."))
             }
         }
-        .navigationTitle("Редактор файла")
+        .navigationTitle(L("Редактор файла", "File editor"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Закрыть") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { Button(L("Закрыть", "Close")) { dismiss() } }
         }
     }
 
@@ -217,11 +217,11 @@ struct FilesView: View {
                     }
                 }
                 if !loading && entries.isEmpty && path != "/" {
-                    Text("Пусто или нет прав").foregroundStyle(.secondary)
+                    Text(L("Пусто или нет прав", "Empty or no permission")).foregroundStyle(.secondary)
                 }
             }
         }
-        .navigationTitle("Файлы")
+        .navigationTitle(L("Файлы", "Files"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .onAppear { if entries.isEmpty { Task { await load() } } }
@@ -277,15 +277,15 @@ struct QuickFileEditor: View {
                 Button {
                     Task { await save() }
                 } label: {
-                    HStack { Spacer(); if busy { ProgressView().padding(.trailing, 8) }; Text("Сохранить (с .bak-копией)"); Spacer() }
+                    HStack { Spacer(); if busy { ProgressView().padding(.trailing, 8) }; Text(L("Сохранить (с .bak-копией)", "Save (with .bak copy)")); Spacer() }
                 }
                 .disabled(busy || !loaded)
             }
         }
-        .navigationTitle("Файл")
+        .navigationTitle(L("Файл", "File"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Закрыть") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { Button(L("Закрыть", "Close")) { dismiss() } }
         }
         .onAppear { if !loaded { Task { await load() } } }
     }
@@ -322,12 +322,12 @@ struct WolView: View {
                     Button {
                         Task { await install() }
                     } label: {
-                        Label("Установить etherwake на роутер", systemImage: "square.and.arrow.down")
+                        Label(L("Установить etherwake на роутер", "Install etherwake on the router"), systemImage: "square.and.arrow.down")
                     }
                 }
             }
-            Section("Цели") {
-                if targets.isEmpty { Text("Добавь компьютер по MAC-адресу").foregroundStyle(.secondary) }
+            Section(L("Цели", "Targets")) {
+                if targets.isEmpty { Text(L("Добавь компьютер по MAC-адресу", "Add a computer by MAC address")).foregroundStyle(.secondary) }
                 ForEach(targets) { t in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -346,16 +346,16 @@ struct WolView: View {
                         Button(role: .destructive) {
                             targets.removeAll { $0.id == t.id }
                             saveTargets()
-                        } label: { Label("Удалить", systemImage: "trash") }
+                        } label: { Label(L("Удалить", "Delete"), systemImage: "trash") }
                     }
                 }
             }
             Section {
                 Button {
                     showAdd = true
-                } label: { Label("Добавить цель", systemImage: "plus") }
+                } label: { Label(L("Добавить цель", "Add target"), systemImage: "plus") }
             } footer: {
-                Text("Цели хранятся на iPhone. MAC-адрес вида AA:BB:CC:DD:EE:FF. Интерфейс — обычно br-lan.")
+                Text(L("Цели хранятся на iPhone. MAC-адрес вида AA:BB:CC:DD:EE:FF. Интерфейс — обычно br-lan.", "Targets are stored on the iPhone. MAC like AA:BB:CC:DD:EE:FF. Interface is usually br-lan."))
             }
         }
         .navigationTitle("Wake-on-LAN")
@@ -363,19 +363,19 @@ struct WolView: View {
             targets = loadTargets()
             if available == nil { Task { await check() } }
         }
-        .alert("Новая цель", isPresented: $showAdd) {
-            TextField("Имя", text: $newName)
+        .alert(L("Новая цель", "New target"), isPresented: $showAdd) {
+            TextField(L("Имя", "Name"), text: $newName)
             TextField("MAC", text: $newMac)
                 .textInputAutocapitalization(.characters)
-            TextField("Интерфейс", text: $newIface)
+            TextField(L("Интерфейс", "Interface"), text: $newIface)
                 .textInputAutocapitalization(.never)
-            Button("Добавить") {
-                let t = WolTarget(name: newName.isEmpty ? "ПК" : newName, mac: newMac.uppercased(), iface: newIface)
+            Button(L("Добавить", "Add")) {
+                let t = WolTarget(name: newName.isEmpty ? L("ПК", "PC") : newName, mac: newMac.uppercased(), iface: newIface)
                 targets.append(t)
                 saveTargets()
                 newName = ""; newMac = ""
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
     }
 
@@ -426,7 +426,7 @@ struct DiagnosticsView: View {
 
     var body: some View {
         List {
-            Section("Аплинк") {
+            Section(L("Аплинк", "Uplink")) {
                 HStack {
                     switch app.uplink.st {
                     case .ok: MmBadge(text: "OK · \(app.uplink.path)", tone: .ok)
@@ -442,7 +442,7 @@ struct DiagnosticsView: View {
                         Task { await probe(f) }
                     } label: {
                         HStack {
-                            Text("curl 204 через \(f)")
+                            Text(L("curl 204 через \(f)", "curl 204 via \(f)"))
                             Spacer()
                             Image(systemName: "play")
                         }
@@ -450,13 +450,13 @@ struct DiagnosticsView: View {
                     .buttonStyle(.borderless)
                 }
             }
-            Section("Спидтест (Яндекс)") {
+            Section(L("Спидтест (Яндекс)", "Speed test (Yandex)")) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
                     ForEach([""] + speedIfaces, id: \.self) { f in
                         Button {
                             speedIface = f
                         } label: {
-                            Text(f.isEmpty ? "Авто" : Self.ifaceLabel(f))
+                            Text(f.isEmpty ? L("Авто", "Auto") : Self.ifaceLabel(f))
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
@@ -472,7 +472,7 @@ struct DiagnosticsView: View {
                     HStack {
                         if speedBusy { ProgressView().padding(.trailing, 6) }
                         Image(systemName: "speedometer")
-                        Text(speedBusy ? speedPhase : "Запустить спидтест")
+                        Text(speedBusy ? speedPhase : L("Запустить спидтест", "Run speed test"))
                     }
                 }
                 .buttonStyle(.borderless)
@@ -508,8 +508,8 @@ struct DiagnosticsView: View {
                 var seen = Set<String>()
                 speedIfaces = Array(names.filter { seen.insert($0).inserted }.prefix(4))
             }
-            Section("Ping с роутера") {
-                TextField("хост", text: $host)
+            Section(L("Ping с роутера", "Ping from the router")) {
+                TextField(L("хост", "host"), text: $host)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -531,12 +531,12 @@ struct DiagnosticsView: View {
                 }
             }
         }
-        .navigationTitle("Диагностика")
+        .navigationTitle(L("Диагностика", "Diagnostics"))
     }
 
     private static func ifaceLabel(_ n: String) -> String {
-        if n.hasPrefix("wwan") || n.hasPrefix("qmi") { return "Модем (\(n))" }
-        if n.hasPrefix("usb") || n.hasPrefix("pppoe") || n.contains("wan") { return "Кабель (\(n))" }
+        if n.hasPrefix("wwan") || n.hasPrefix("qmi") { return L("Модем (\(n))", "Modem (\(n))") }
+        if n.hasPrefix("usb") || n.hasPrefix("pppoe") || n.contains("wan") { return L("Кабель (\(n))", "Cable (\(n))") }
         return n
     }
 
@@ -547,7 +547,7 @@ struct DiagnosticsView: View {
         speedBusy = true
         defer { speedBusy = false }
         speedDown = nil; speedUp = nil; speedPing = nil; speedError = nil
-        speedPhase = "Запуск…"
+        speedPhase = L("Запуск…", "Starting…")
         let safe = speedIface.filter { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-".contains($0) }
         let bind = safe.isEmpty ? "" : "--interface \(safe) "
         let script =
@@ -598,15 +598,15 @@ struct DiagnosticsView: View {
                 let res = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
                 if !ph.isEmpty {
                     switch ph {
-                    case "down": speedPhase = "Скачивание…"
-                    case "up": speedPhase = "Отдача…"
-                    case "ping": speedPhase = "Пинг…"
+                    case "down": speedPhase = L("Скачивание…", "Downloading…")
+                    case "up": speedPhase = L("Отдача…", "Uploading…")
+                    case "ping": speedPhase = L("Пинг…", "Ping…")
                     default: speedPhase = ph
                     }
                 }
                 if !res.isEmpty {
                     if res == "err" {
-                        speedError = "Роутер не получил серверы замера"
+                        speedError = L("Роутер не получил серверы замера", "The router did not get test servers")
                     } else {
                         let pr = res.split(whereSeparator: { $0.isWhitespace }).map(String.init)
                         speedDown = pr.first.flatMap { Double($0) }.map { $0 * 8 / 1_000_000 }
@@ -617,7 +617,7 @@ struct DiagnosticsView: View {
                     return
                 }
             }
-            speedError = "Не дождались результата замера (таймаут)"
+            speedError = L("Не дождались результата замера (таймаут)", "Timed out waiting for the test result")
             speedPhase = ""
         } catch {
             speedError = error.localizedDescription
@@ -644,7 +644,7 @@ struct DiagnosticsView: View {
         busy = true
         defer { busy = false }
         if app.conn == .demo {
-            pingOut = "PING 8.8.8.8: 56 data bytes\n64 bytes from 8.8.8.8: seq=0 ttl=57 time=41.2 ms (демо)"
+            pingOut = L("PING 8.8.8.8: 56 data bytes\n64 bytes from 8.8.8.8: seq=0 ttl=57 time=41.2 ms (демо)", "PING 8.8.8.8: 56 data bytes\n64 bytes from 8.8.8.8: seq=0 ttl=57 time=41.2 ms (demo)")
             return
         }
         let h = host
@@ -662,19 +662,19 @@ struct LinksView: View {
             Section {
                 if let p = app.activeProfile {
                     Link(destination: URL(string: "\(p.scheme)://\(p.host)\(p.port == 80 || p.port == 443 ? "" : ":\(p.port)")/cgi-bin/luci/admin")!) {
-                        Label("LuCI — веб-интерфейс роутера", systemImage: "safari")
+                        Label(L("LuCI — веб-интерфейс роутера", "LuCI — the router web interface"), systemImage: "safari")
                     }
                     Link(destination: URL(string: "\(p.scheme)://\(p.host)\(p.port == 80 || p.port == 443 ? "" : ":\(p.port)")/cgi-bin/modem-telemetry")!) {
-                        Label("Телеметрия модема", systemImage: "chart.line.uptrend.xyaxis")
+                        Label(L("Телеметрия модема", "Modem telemetry"), systemImage: "chart.line.uptrend.xyaxis")
                     }
                 }
             } header: {
-                Text("Открыть в Safari")
+                Text(L("Открыть в Safari", "Open in Safari"))
             } footer: {
-                Text("LuCI сначала покажет страницу входа: логин root, пароль роутера — после входа откроется интерфейс. Страницы открываются, когда iPhone в сети роутера.")
+                Text(L("LuCI сначала покажет страницу входа: логин root, пароль роутера — после входа откроется интерфейс. Страницы открываются, когда iPhone в сети роутера.", "LuCI first shows a login page: login root, router password — the interface opens after login. Pages open while the iPhone is on the router's network."))
             }
         }
-        .navigationTitle("LuCI и телеметрия")
+        .navigationTitle(L("LuCI и телеметрия", "LuCI & telemetry"))
     }
 }
 
@@ -701,7 +701,7 @@ struct MenuConfigView: View {
                 }
             }
         }
-        .navigationTitle("Настройка меню")
+        .navigationTitle(L("Настройка меню", "Menu setup"))
     }
 }
 
@@ -712,31 +712,39 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Опрос") {
-                Picker("Интервал опроса", selection: intervalBinding) {
-                    Text("1 с").tag(1.0)
-                    Text("2 с").tag(2.0)
-                    Text("5 с").tag(5.0)
-                    Text("10 с").tag(10.0)
+            Section {
+                Picker("Язык / Language", selection: langBinding) {
+                    Text("RU — Русский").tag("ru")
+                    Text("EN — English").tag("en")
+                }
+            } header: {
+                Text(L("Язык / Language", "Language / Язык"))
+            }
+            Section(L("Опрос", "Polling")) {
+                Picker(L("Интервал опроса", "Polling interval"), selection: intervalBinding) {
+                    Text(L("1 с", "1 s")).tag(1.0)
+                    Text(L("2 с", "2 s")).tag(2.0)
+                    Text(L("5 с", "5 s")).tag(5.0)
+                    Text(L("10 с", "10 s")).tag(10.0)
                 }
             }
             Section {
-                Toggle("Безопасный режим", isOn: $app.settings.safeMode)
+                Toggle(L("Безопасный режим", "Safe mode"), isOn: $app.settings.safeMode)
             } header: {
-                Text("Безопасность")
+                Text(L("Безопасность", "Security"))
             } footer: {
-                Text("Блокирует опасные shell-команды (reboot, sysupgrade, rm -rf / и т.п.), если они встречаются в редактируемых полях.")
+                Text(L("Блокирует опасные shell-команды (reboot, sysupgrade, rm -rf / и т.п.), если они встречаются в редактируемых полях.", "Blocks dangerous shell commands (reboot, sysupgrade, rm -rf / etc.) found in editable fields."))
             }
-            Section("О приложении") {
-                LabeledContent("Версия", value: "1.0 (iOS)")
-                LabeledContent("Прототип", value: "ModemMon 2.6 (Android)")
-                LabeledContent("Подключение", value: "ubus JSON-RPC + medvemodem CGI")
+            Section(L("О приложении", "About")) {
+                LabeledContent(L("Версия", "Version"), value: "1.0 (iOS)")
+                LabeledContent(L("Прототип", "Prototype"), value: "ModemMon 2.6 (Android)")
+                LabeledContent(L("Подключение", "Connection"), value: "ubus JSON-RPC + medvemodem CGI")
             }
         }
-        .navigationTitle("Настройки")
+        .navigationTitle(L("Настройки", "Settings"))
     }
 
-    private var intervalBinding: Binding<Double> {
+    private var langBinding: Binding<String> {
         Binding(get: { app.settings.pollInterval }, set: { v in
             app.settings.pollInterval = v
             app.startPolling()

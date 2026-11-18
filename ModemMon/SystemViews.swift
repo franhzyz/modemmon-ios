@@ -13,37 +13,37 @@ struct SystemView: View {
     var body: some View {
         List {
             if let s = sys {
-                Section("Обзор") {
+                Section(L("Обзор", "Overview")) {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                         StatTile(title: "Load 1/5/15", value: String(format: "%.2f", s.load1), sub: String(format: "%.2f / %.2f", s.load5, s.load15))
-                        StatTile(title: "Память занято", value: Fmt.bytes((s.memTotalKb - s.memFreeKb) * 1024), sub: "из \(Fmt.bytes(s.memTotalKb * 1024))")
+                        StatTile(title: L("Память занято", "Memory used"), value: Fmt.bytes((s.memTotalKb - s.memFreeKb) * 1024), sub: L("из \(Fmt.bytes(s.memTotalKb * 1024))", "of \(Fmt.bytes(s.memTotalKb * 1024))"))
                         StatTile(title: "Uptime", value: Fmt.uptime(s.uptime))
                         StatTile(title: "CPU temp", value: Fmt.temp(s.cpuTemp))
                     }
-                    KVRow(key: "Хост", value: s.hostname)
-                    KVRow(key: "Модель", value: s.model)
-                    KVRow(key: "Прошивка", value: s.firmware)
-                    KVRow(key: "Ядро", value: s.kernel)
+                    KVRow(key: L("Хост", "Host"), value: s.hostname)
+                    KVRow(key: L("Модель", "Model"), value: s.model)
+                    KVRow(key: L("Прошивка", "Firmware"), value: s.firmware)
+                    KVRow(key: L("Ядро", "Kernel"), value: s.kernel)
                 }
             } else {
-                Section { ProgressView("Читаем систему…").frame(maxWidth: .infinity) }
+                Section { ProgressView(L("Читаем систему…", "Reading the system…")).frame(maxWidth: .infinity) }
             }
 
-            Section("Инструменты") {
-                NavigationLink(value: SysRoute.cpu) { Label("Процессор и частоты", systemImage: "cpu") }
-                NavigationLink(value: SysRoute.packages) { Label("Пакеты (apk/opkg)", systemImage: "shippingbox") }
-                NavigationLink(value: SysRoute.services) { Label("Сервисы (init.d)", systemImage: "list.bullet.rectangle") }
-                NavigationLink(value: SysRoute.processes) { Label("Процессы", systemImage: "person.3.sequence") }
+            Section(L("Инструменты", "Tools")) {
+                NavigationLink(value: SysRoute.cpu) { Label(L("Процессор и частоты", "Processor and frequencies"), systemImage: "cpu") }
+                NavigationLink(value: SysRoute.packages) { Label(L("Пакеты (apk/opkg)", "Packages (apk/opkg)"), systemImage: "shippingbox") }
+                NavigationLink(value: SysRoute.services) { Label(L("Сервисы (init.d)", "Services (init.d)"), systemImage: "list.bullet.rectangle") }
+                NavigationLink(value: SysRoute.processes) { Label(L("Процессы", "Processes"), systemImage: "person.3.sequence") }
                 NavigationLink(value: SysRoute.crontab) { Label("Crontab", systemImage: "clock") }
-                NavigationLink(value: SysRoute.backup) { Label("Бэкапы (sysupgrade)", systemImage: "externaldrive.badge.timemachine") }
-                NavigationLink(value: SysRoute.exec) { Label("Быстрые команды", systemImage: "bolt.horizontal") }
-                NavigationLink(value: SysRoute.log) { Label("Лог (logread)", systemImage: "doc.plaintext") }
+                NavigationLink(value: SysRoute.backup) { Label(L("Бэкапы (sysupgrade)", "Backups (sysupgrade)"), systemImage: "externaldrive.badge.timemachine") }
+                NavigationLink(value: SysRoute.exec) { Label(L("Быстрые команды", "Quick commands"), systemImage: "bolt.horizontal") }
+                NavigationLink(value: SysRoute.log) { Label(L("Лог (logread)", "Log (logread)"), systemImage: "doc.plaintext") }
                 NavigationLink(value: SysRoute.leds) { Label("LED", systemImage: "lightbulb") }
-                NavigationLink(value: SysRoute.reboot) { Label("Перезагрузка роутера", systemImage: "arrow.counterclockwise.circle") }
+                NavigationLink(value: SysRoute.reboot) { Label(L("Перезагрузка роутера", "Router reboot"), systemImage: "arrow.counterclockwise.circle") }
                     .foregroundStyle(.red)
             }
         }
-        .navigationTitle("Система")
+        .navigationTitle(L("Система", "System"))
         .navigationDestination(for: SysRoute.self) { r in
             switch r {
             case .cpu: CpuView()
@@ -71,13 +71,13 @@ struct CpuView: View {
 
     var body: some View {
         List {
-            Section("Ядра") {
+            Section(L("Ядра", "Cores")) {
                 if cores.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(cores) { c in
                     HStack {
                         Text("cpu\(c.id)").font(.system(.subheadline, design: .monospaced))
                         Spacer()
-                        if let f = c.freqMhz { Text("\(f) МГц").monospacedDigit().foregroundStyle(.secondary) }
+                        if let f = c.freqMhz { Text(L("\(f) МГц", "\(f) MHz")).monospacedDigit().foregroundStyle(.secondary) }
                         if let l = c.load {
                             Text(String(format: "%.0f%%", l)).monospacedDigit()
                         }
@@ -85,7 +85,7 @@ struct CpuView: View {
                 }
             }
             Section {
-                ProgressRow(label: "Загрузка 1 мин", value: min(1, (app.sys?.load1 ?? 0) / Double(max(1, cores.count))), caption: String(format: "%.2f", app.sys?.load1 ?? 0))
+                ProgressRow(label: L("Загрузка 1 мин", "Load 1 min"), value: min(1, (app.sys?.load1 ?? 0) / Double(max(1, cores.count))), caption: String(format: "%.2f", app.sys?.load1 ?? 0))
             }
         }
         .navigationTitle("CPU")
@@ -111,12 +111,12 @@ struct PackagesView: View {
     var body: some View {
         List {
             Section {
-                TextField("Фильтр", text: $filter)
+                TextField(L("Фильтр", "Filter"), text: $filter)
                 Button {
                     showAdd = true
-                } label: { Label("Установить пакет", systemImage: "plus") }
+                } label: { Label(L("Установить пакет", "Install package"), systemImage: "plus") }
             }
-            Section("Установлено: \(pkgs.count)") {
+            Section(L("Установлено: \(pkgs.count)", "Installed: \(pkgs.count)")) {
                 if pkgs.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(pkgs.filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }) { p in
                     HStack {
@@ -126,8 +126,8 @@ struct PackagesView: View {
                         }
                         Spacer()
                         Menu {
-                            Button("Обновить") { Task { await action(p.name, .upgrade) } }
-                            Button("Удалить", role: .destructive) { Task { await action(p.name, .remove) } }
+                            Button(L("Обновить", "Refresh")) { Task { await action(p.name, .upgrade) } }
+                            Button(L("Удалить", "Delete"), role: .destructive) { Task { await action(p.name, .remove) } }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
@@ -135,14 +135,14 @@ struct PackagesView: View {
                 }
             }
         }
-        .navigationTitle("Пакеты")
+        .navigationTitle(L("Пакеты", "Packages"))
         .refreshable { await load() }
         .onAppear { if pkgs.isEmpty { Task { await load() } } }
-        .alert("Имя пакета", isPresented: $showAdd) {
-            TextField("например etherwake", text: $newPkg)
+        .alert(L("Имя пакета", "Package name"), isPresented: $showAdd) {
+            TextField(L("например etherwake", "e.g. etherwake"), text: $newPkg)
                 .textInputAutocapitalization(.never)
-            Button("Установить") { Task { await action(newPkg, .install); newPkg = "" } }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Установить", "Install")) { Task { await action(newPkg, .install); newPkg = "" } }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
     }
 
@@ -190,7 +190,7 @@ struct ServicesView: View {
                 }
             }
         }
-        .navigationTitle("Сервисы")
+        .navigationTitle(L("Сервисы", "Services"))
         .refreshable { await load() }
         .onAppear { if services.isEmpty { Task { await load() } } }
     }
@@ -216,9 +216,9 @@ struct ProcessesView: View {
     var body: some View {
         List {
             Section {
-                TextField("Фильтр", text: $filter)
+                TextField(L("Фильтр", "Filter"), text: $filter)
             }
-            Section("Процессы") {
+            Section(L("Процессы", "Processes")) {
                 if procs.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(procs.filter { filter.isEmpty || $0.command.localizedCaseInsensitiveContains(filter) }) { p in
                     HStack {
@@ -234,7 +234,7 @@ struct ProcessesView: View {
                 }
             }
         }
-        .navigationTitle("Процессы")
+        .navigationTitle(L("Процессы", "Processes"))
         .refreshable { await load() }
         .onAppear { if procs.isEmpty { Task { await load() } } }
     }
@@ -262,7 +262,7 @@ struct CrontabView: View {
                 HStack {
                     Spacer()
                     if busy { ProgressView().padding(.trailing, 8) }
-                    Text("Сохранить crontab").bold()
+                    Text(L("Сохранить crontab", "Save crontab")).bold()
                     Spacer()
                 }
             }
@@ -299,7 +299,7 @@ struct BackupView: View {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
-                        Label("Создать бэкап (sysupgrade -b)", systemImage: "plus.rectangle.on.folder")
+                        Label(L("Создать бэкап (sysupgrade -b)", "Create backup (sysupgrade -b)"), systemImage: "plus.rectangle.on.folder")
                         Spacer()
                     }
                 }
@@ -307,7 +307,7 @@ struct BackupView: View {
             }
             Section {
                 // Бэкапы в /tmp
-                if backups.isEmpty { Text("Пока нет").foregroundStyle(.secondary) }
+                if backups.isEmpty { Text(L("Пока нет", "None yet")).foregroundStyle(.secondary) }
                 ForEach(backups) { b in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -325,12 +325,12 @@ struct BackupView: View {
                     }
                 }
             } header: {
-                Text("Бэкапы в /tmp")
+                Text(L("Бэкапы в /tmp", "Backups in /tmp"))
             } footer: {
-                Text("Бэкап лежит в /tmp — после перезагрузки роутера исчезает. Скачайте важное через «Файлы».")
+                Text(L("Бэкап лежит в /tmp — после перезагрузки роутера исчезает. Скачайте важное через «Файлы».", "The backup lives in /tmp — it disappears after a router reboot. Download what matters via “Files”."))
             }
         }
-        .navigationTitle("Бэкапы")
+        .navigationTitle(L("Бэкапы", "Backups"))
         .refreshable { await load() }
         .onAppear { if backups.isEmpty { Task { await load() } } }
     }
@@ -362,7 +362,7 @@ struct ExecView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                Text(output.isEmpty ? "Вывод появится здесь" : output)
+                Text(output.isEmpty ? L("Вывод появится здесь", "Output will appear here") : output)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(output.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -383,7 +383,7 @@ struct ExecView: View {
             .padding(.vertical, 6)
             Divider()
             HStack(spacing: 8) {
-                TextField("команда", text: $cmd)
+                TextField(L("команда", "command"), text: $cmd)
                     .font(.system(.body, design: .monospaced))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -396,7 +396,7 @@ struct ExecView: View {
             }
             .padding(10)
         }
-        .navigationTitle("Быстрые команды")
+        .navigationTitle(L("Быстрые команды", "Quick commands"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -405,7 +405,7 @@ struct ExecView: View {
         let c = cmd
         output += "\n$ \(c)\n"
         if app.conn == .demo {
-            output += "(демо-режим)\n"
+            output += L("(демо-режим)\n", "(demo mode)\n")
             return
         }
         do {
@@ -413,7 +413,7 @@ struct ExecView: View {
             output += r.stdout
             if !r.stderr.isEmpty { output += r.stderr }
         } catch {
-            output += "ошибка: \(error.localizedDescription)\n"
+            output += L("ошибка: \(error.localizedDescription)\n", "error: \(error.localizedDescription)\n")
         }
         if output.count > 20_000 { output = String(output.suffix(20_000)) }
     }
@@ -475,28 +475,28 @@ struct RebootView: View {
     var body: some View {
         Form {
             Section {
-                Label("Роутер уйдёт в перезагрузку и будет недоступен ~1-2 минуты.", systemImage: "exclamationmark.triangle")
+                Label(L("Роутер уйдёт в перезагрузку и будет недоступен ~1-2 минуты.", "The router will reboot and be unavailable for ~1-2 minutes."), systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 Button(role: .destructive) {
                     confirm = true
                 } label: {
-                    HStack { Spacer(); Text("Перезагрузить роутер").bold(); Spacer() }
+                    HStack { Spacer(); Text(L("Перезагрузить роутер", "Reboot router")).bold(); Spacer() }
                 }
             }
             if done {
-                Section { Text("Команда отправлена. Ждём…").foregroundStyle(.secondary) }
+                Section { Text(L("Команда отправлена. Ждём…", "Command sent. Waiting…")).foregroundStyle(.secondary) }
             }
         }
         .navigationTitle("Reboot")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Точно перезагрузить?", isPresented: $confirm) {
-            Button("Перезагрузить", role: .destructive) {
+        .alert(L("Точно перезагрузить?", "Reboot for sure?"), isPresented: $confirm) {
+            Button(L("Перезагрузить", "Reboot"), role: .destructive) {
                 Task {
                     await app.run { svc in try await svc.rebootRouter() }
                     done = true
                 }
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
     }
 }
@@ -512,7 +512,7 @@ struct ConfigView: View {
 
     var body: some View {
         List {
-            Section("Файлы в /etc/config") {
+            Section(L("Файлы в /etc/config", "Files in /etc/config")) {
                 if configs.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(configs, id: \.self) { c in
                     NavigationLink(value: UciRoute(name: c)) {
@@ -523,7 +523,7 @@ struct ConfigView: View {
                 }
             }
         }
-        .navigationTitle("Конфиг UCI")
+        .navigationTitle(L("Конфиг UCI", "UCI config"))
         .navigationDestination(for: UciRoute.self) { r in
             UciConfigView(name: r.name)
         }
@@ -599,11 +599,11 @@ struct UciOptionEditor: View {
             editing = true
         }
         .disabled(busy)
-        .alert("Изменить \(option.name)", isPresented: $editing) {
-            TextField("значение", text: $draft)
+        .alert(L("Изменить \(option.name)", "Edit \(option.name)"), isPresented: $editing) {
+            TextField(L("значение", "value"), text: $draft)
                 .textInputAutocapitalization(.never)
-            Button("Сохранить") { Task { await save() } }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Сохранить", "Save")) { Task { await save() } }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
     }
 

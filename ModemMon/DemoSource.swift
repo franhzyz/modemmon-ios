@@ -101,7 +101,7 @@ enum DemoSource {
             ScanResult(ssid: "Rostelecom-AP", bssid: "10:13:31:AA:00:02", channel: 6, band: "2.4", signal: -59, width: "20 MHz", encryption: "WPA2-PSK"),
             ScanResult(ssid: "MGTS_2345", bssid: "F4:CA:E7:BB:00:03", channel: 11, band: "2.4", signal: -72, width: "20 MHz", encryption: "WPA2-PSK"),
             ScanResult(ssid: "Beeline_Free", bssid: "F4:CA:E7:BB:00:04", channel: 1, band: "2.4", signal: -81, width: "20 MHz", encryption: "OPEN"),
-            ScanResult(ssid: "(скрытая)", bssid: "98:DA:C4:CC:00:05", channel: 100, band: "5", signal: -84, width: "80 MHz", encryption: "WPA3-SAE"),
+            ScanResult(ssid: L("(скрытая)", "(hidden)"), bssid: "98:DA:C4:CC:00:05", channel: 100, band: "5", signal: -84, width: "80 MHz", encryption: "WPA3-SAE"),
         ]
     }
 
@@ -214,9 +214,9 @@ enum DemoSource {
 
     static func smsList() -> [Sms] {
         [
-            Sms(id: "3", number: "MTS", text: "Ваш баланс: 312,45 руб. Пополните счёт до 20.11.", ts: Date().addingTimeInterval(-3600), isNew: true),
-            Sms(id: "2", number: "+79161234567", text: "Привет! Роутер то перезагружал?", ts: Date().addingTimeInterval(-86_400), isNew: false),
-            Sms(id: "1", number: "MTS", text: "Пакет трафика израсходован на 80%.", ts: Date().addingTimeInterval(-172_800), isNew: false),
+            Sms(id: "3", number: "MTS", text: L("Ваш баланс: 312,45 руб. Пополните счёт до 20.11.", "Your balance: 312.45 RUB. Top up by 20.11."), ts: Date().addingTimeInterval(-3600), isNew: true),
+            Sms(id: "2", number: "+79161234567", text: L("Привет! Роутер то перезагружал?", "Hi! Did you reboot the router again?"), ts: Date().addingTimeInterval(-86_400), isNew: false),
+            Sms(id: "1", number: "MTS", text: L("Пакет трафика израсходован на 80%.", "Data plan used up by 80%."), ts: Date().addingTimeInterval(-172_800), isNew: false),
         ]
     }
 }

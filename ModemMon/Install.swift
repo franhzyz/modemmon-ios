@@ -6,7 +6,7 @@ enum Install {
     static let aclJSON = """
     {
         "modemmon": {
-            "description": "ModemMon: файлы, команды, сеть, iwinfo, wireguard",
+            "description": L("ModemMon: файлы, команды, сеть, iwinfo, wireguard", "ModemMon: files, commands, network, iwinfo, wireguard"),
             "read": {
                 "file": {
                     "/proc/*": [ "read" ],
@@ -141,7 +141,7 @@ enum Install {
             "echo \(b64) | base64 -d > /usr/share/rpcd/acl.d/modemmon.json && /etc/init.d/rpcd restart 2>/dev/null; sleep 1; echo done"
         )
         guard r.stdout.contains("done") else {
-            throw MmError.backend("ACL не установился: \(r.stderr.isEmpty ? r.stdout : r.stderr)")
+            throw MmError.backend(L("ACL не установился: \(r.stderr.isEmpty ? r.stdout : r.stderr)", "ACL not installed: \(r.stderr.isEmpty ? r.stdout : r.stderr)"))
         }
     }
 
@@ -153,7 +153,7 @@ enum Install {
         )
         let chk = try await ubus.fileExec("/usr/bin/mmterm check")
         guard chk.stdout.contains("ok") else {
-            throw MmError.backend("mmterm не отвечает: \(chk.stdout.isEmpty ? chk.stderr : chk.stdout)")
+            throw MmError.backend(L("mmterm не отвечает: \(chk.stdout.isEmpty ? chk.stderr : chk.stdout)", "mmterm not responding: \(chk.stdout.isEmpty ? chk.stderr : chk.stdout)"))
         }
     }
 

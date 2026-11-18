@@ -10,20 +10,20 @@ struct ConnectView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Подключение (ubus)") {
-                    Picker("Профиль", selection: profileBinding) {
+                Section(L("Подключение (ubus)", "Connection (ubus)")) {
+                    Picker(L("Профиль", "Profile"), selection: profileBinding) {
                         ForEach(app.profiles) { p in
                             Text(p.name.isEmpty ? p.host : p.name).tag(Optional(p.id))
                         }
                     }
                     if let p = activeProfile {
-                        LabeledContent("Адрес", value: "\(p.scheme)://\(p.host):\(p.port)")
-                        LabeledContent("Пользователь", value: p.user)
-                        SecureField("Пароль", text: $password)
+                        LabeledContent(L("Адрес", "Address"), value: "\(p.scheme)://\(p.host):\(p.port)")
+                        LabeledContent(L("Пользователь", "Username"), value: p.user)
+                        SecureField(L("Пароль", "Password"), text: $password)
                             .textContentType(.password)
                             .submitLabel(.go)
                             .onSubmit { Task { await connect() } }
-                        Toggle("Сохранить пароль", isOn: Binding(
+                        Toggle(L("Сохранить пароль", "Save password"), isOn: Binding(
                             get: { app.wantsSavedPassword(p) },
                             set: { app.setSavePassword($0, for: p) }
                         ))
@@ -36,9 +36,9 @@ struct ConnectView: View {
                             Spacer()
                             if app.conn == .connecting {
                                 ProgressView().padding(.trailing, 6)
-                                Text("Подключение…")
+                                Text(L("Подключение…", "Connecting…"))
                             } else {
-                                Text("Подключиться").bold()
+                                Text(L("Подключиться", "Connect")).bold()
                             }
                             Spacer()
                         }
@@ -54,7 +54,7 @@ struct ConnectView: View {
                     }
                 }
 
-                Section("Профили роутеров") {
+                Section(L("Профили роутеров", "Router profiles")) {
                     ForEach(app.profiles) { p in
                         Button {
                             editTarget = p
@@ -87,7 +87,7 @@ struct ConnectView: View {
                         editTarget = nil
                         showEditor = true
                     } label: {
-                        Label("Новый профиль", systemImage: "plus")
+                        Label(L("Новый профиль", "New profile"), systemImage: "plus")
                     }
                 }
 
@@ -97,12 +97,12 @@ struct ConnectView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            Label("Открыть демо-режим", systemImage: "play.circle")
+                            Label(L("Открыть демо-режим", "Open demo mode"), systemImage: "play.circle")
                             Spacer()
                         }
                     }
                 } footer: {
-                    Text("Демо показывает все экраны на выдуманных данных — удобно посмотреть, как всё выглядит, пока роутера нет под рукой.")
+                    Text(L("Демо показывает все экраны на выдуманных данных — удобно посмотреть, как всё выглядит, пока роутера нет под рукой.", "Demo shows all screens with made-up data — handy to see how everything looks while the router is out of reach."))
                 }
             }
             .navigationTitle("ModemMon")
@@ -145,41 +145,41 @@ struct ProfileEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Профиль") {
-                    TextField("Название", text: $profile.name, prompt: Text("Дом / Дача / Медведь"))
-                    TextField("Хост или IP", text: $profile.host, prompt: Text("192.168.2.1"))
+                Section(L("Профиль", "Profile")) {
+                    TextField(L("Название", "Name"), text: $profile.name, prompt: Text(L("Дом / Дача / Медведь", "Home / Dacha / Bear")))
+                    TextField(L("Хост или IP", "Host or IP"), text: $profile.host, prompt: Text("192.168.2.1"))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("Порт", value: $profile.port, format: .number.grouping(.never))
+                    TextField(L("Порт", "Port"), value: $profile.port, format: .number.grouping(.never))
                         .keyboardType(.numberPad)
-                    Picker("Схема", selection: $profile.scheme) {
+                    Picker(L("Схема", "Scheme"), selection: $profile.scheme) {
                         Text("http").tag("http")
                         Text("https").tag("https")
                     }
-                    TextField("Путь ubus", text: $profile.ubusPath, prompt: Text("/ubus"))
+                    TextField(L("Путь ubus", "ubus path"), text: $profile.ubusPath, prompt: Text("/ubus"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("Путь CGI модема", text: $profile.modemPath, prompt: Text("/cgi-bin/modem"))
+                    TextField(L("Путь CGI модема", "Modem CGI path"), text: $profile.modemPath, prompt: Text("/cgi-bin/modem"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
-                Section("Учётная запись") {
-                    TextField("Пользователь", text: $profile.user, prompt: Text("root"))
+                Section(L("Учётная запись", "Account")) {
+                    TextField(L("Пользователь", "Username"), text: $profile.user, prompt: Text("root"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("Пароль вводится на экране подключения и сохраняется только при включённом переключателе.")
+                    Text(L("Пароль вводится на экране подключения и сохраняется только при включённом переключателе.", "The password is entered on the connect screen and saved only when the toggle is on."))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle(isNew ? "Новый профиль" : "Профиль")
+            .navigationTitle(isNew ? L("Новый профиль", "New profile") : L("Профиль", "Profile"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Отмена") { dismiss() }
+                    Button(L("Отмена", "Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(L("Сохранить", "Save")) {
                         profile.name = profile.name.isEmpty ? profile.host : profile.name
                         if let i = app.profiles.firstIndex(where: { $0.id == profile.id }) {
                             app.profiles[i] = profile

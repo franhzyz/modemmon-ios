@@ -23,7 +23,7 @@ struct RouterProfile: Identifiable, Codable, Equatable {
         return URL(string: s) ?? URL(string: "http://192.168.2.1")!
     }
 
-    static let `default` = RouterProfile(name: "Роутер", host: "192.168.2.1", port: 80)
+    static let `default` = RouterProfile(name: L("Роутер", "Router"), host: "192.168.2.1", port: 80)
 }
 
 // MARK: - Настройки

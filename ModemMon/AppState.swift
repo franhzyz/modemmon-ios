@@ -82,7 +82,7 @@ final class AppState: ObservableObject {
             if Keychain.setPassword(legacy, for: p.id.uuidString) {
                 UserDefaults.standard.removeObject(forKey: key)
             } else {
-                banner = "Не удалось перенести сохранённый пароль в Keychain."
+                banner = L("Не удалось перенести сохранённый пароль в Keychain.", "Failed to migrate the saved password to Keychain.")
             }
             return legacy
         }
@@ -115,7 +115,7 @@ final class AppState: ObservableObject {
                 if Keychain.setPassword(password, for: p.id.uuidString) {
                     UserDefaults.standard.removeObject(forKey: "mm.pw." + p.id.uuidString)
                 } else {
-                    banner = "Подключено, но пароль не удалось сохранить в Keychain."
+                    banner = L("Подключено, но пароль не удалось сохранить в Keychain.", "Connected, but the password could not be saved to Keychain.")
                 }
             } else {
                 clearStoredPasswords(for: p)
@@ -183,7 +183,7 @@ final class AppState: ObservableObject {
                 try await svc.ubus.login(user: p.user, pass: sessionPassword ?? storedPassword(for: p))
                 return try await body(svc)
             } catch {
-                banner = "Сессия истекла, перелогин не удался: \(error.localizedDescription)"
+                banner = L("Сессия истекла, перелогин не удался: \(error.localizedDescription)", "Session expired, relogin failed: \(error.localizedDescription)")
                 return nil
             }
         } catch {
@@ -230,7 +230,7 @@ final class AppState: ObservableObject {
             failCount += 1
             if failCount >= 3 {
                 disconnect()
-                connError = "Связь потеряна (шаг: системный опрос): \(error.localizedDescription)"
+                connError = L("Связь потеряна (шаг: системный опрос): \(error.localizedDescription)", "Connection lost (step: system poll): \(error.localizedDescription)")
             }
             return
         }
@@ -248,7 +248,7 @@ final class AppState: ObservableObject {
                                  latencyMs: uplink.latencyMs,
                                  path: uplink.path.isEmpty ? "?" : uplink.path,
                                  checkedAt: Date(),
-                                 detail: "по факту трафика")
+                                 detail: L("по факту трафика", "by actual traffic"))
         }
         appendTrend()
         if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
@@ -264,7 +264,7 @@ final class AppState: ObservableObject {
             failCount = 0
         } catch {
             disconnect()
-            connError = "Сессия истекла, перелогин не удался: \(error.localizedDescription)"
+            connError = L("Сессия истекла, перелогин не удался: \(error.localizedDescription)", "Session expired, relogin failed: \(error.localizedDescription)")
         }
     }
 
@@ -330,7 +330,7 @@ final class AppState: ObservableObject {
                 return
             }
         }
-        uplink = UplinkState(st: .fail, latencyMs: nil, path: "", checkedAt: Date(), detail: "204 нет ни на одном интерфейсе")
+        uplink = UplinkState(st: .fail, latencyMs: nil, path: "", checkedAt: Date(), detail: L("204 нет ни на одном интерфейсе", "204 on no interface"))
     }
 
     // MARK: - Меню (кастомизация, как modemmon_menu в Android)
@@ -343,23 +343,23 @@ final class AppState: ObservableObject {
     }
 
     static let sections: [SectionItem] = [
-        SectionItem(key: "overview", title: "Обзор модема", icon: "antenna.radiowaves.left.and.right"),
-        SectionItem(key: "cells", title: "Соты и сота", icon: "dot.radiowaves.left.and.right"),
-        SectionItem(key: "bands", title: "Бэнды", icon: "slider.horizontal.3"),
+        SectionItem(key: "overview", title: L("Обзор модема", "Modem overview"), icon: "antenna.radiowaves.left.and.right"),
+        SectionItem(key: "cells", title: L("Соты и сота", "Cells & cell"), icon: "dot.radiowaves.left.and.right"),
+        SectionItem(key: "bands", title: L("Бэнды", "Bands"), icon: "slider.horizontal.3"),
         SectionItem(key: "sms", title: "SMS · USSD · AT", icon: "message"),
-        SectionItem(key: "network", title: "Сеть", icon: "network"),
+        SectionItem(key: "network", title: L("Сеть", "Network"), icon: "network"),
         SectionItem(key: "wifi", title: "Wi-Fi", icon: "wifi"),
         SectionItem(key: "vpn", title: "VPN (WireGuard)", icon: "shield.lefthalf.filled"),
-        SectionItem(key: "forkop", title: "Форкоп (sing-box)", icon: "arrow.triangle.swap"),
-        SectionItem(key: "routes", title: "Маршруты", icon: "arrow.triangle.branch"),
-        SectionItem(key: "system", title: "Система", icon: "gearshape.2"),
-        SectionItem(key: "services", title: "Службы", icon: "list.bullet.rectangle.portrait"),
-        SectionItem(key: "config", title: "Конфиг UCI", icon: "list.bullet.indent"),
-        SectionItem(key: "terminal", title: "Терминал", icon: "terminal"),
-        SectionItem(key: "files", title: "Файлы", icon: "folder"),
+        SectionItem(key: "forkop", title: L("Форкоп (sing-box)", "Forkop (sing-box)"), icon: "arrow.triangle.swap"),
+        SectionItem(key: "routes", title: L("Маршруты", "Routes"), icon: "arrow.triangle.branch"),
+        SectionItem(key: "system", title: L("Система", "System"), icon: "gearshape.2"),
+        SectionItem(key: "services", title: L("Службы", "Services"), icon: "list.bullet.rectangle.portrait"),
+        SectionItem(key: "config", title: L("Конфиг UCI", "UCI config"), icon: "list.bullet.indent"),
+        SectionItem(key: "terminal", title: L("Терминал", "Terminal"), icon: "terminal"),
+        SectionItem(key: "files", title: L("Файлы", "Files"), icon: "folder"),
         SectionItem(key: "wol", title: "Wake-on-LAN", icon: "bolt"),
-        SectionItem(key: "diag", title: "Диагностика", icon: "stethoscope"),
-        SectionItem(key: "links", title: "LuCI и телеметрия", icon: "safari"),
+        SectionItem(key: "diag", title: L("Диагностика", "Diagnostics"), icon: "stethoscope"),
+        SectionItem(key: "links", title: L("LuCI и телеметрия", "LuCI & telemetry"), icon: "safari"),
     ]
 
     var visibleSections: [SectionItem] {

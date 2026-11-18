@@ -13,22 +13,22 @@ struct NetworkView: View {
             ifacesCard
             if let l = leasesList { leasesCard(l) }
         }
-        .navigationTitle("Сеть")
+        .navigationTitle(L("Сеть", "Network"))
         .refreshable { await load() }
         .onAppear { if ifaces == nil { Task { await load() } } }
     }
 
     private var uplinkCard: some View {
-        Section("Аплинк") {
+        Section(L("Аплинк", "Uplink")) {
             HStack {
                 switch app.uplink.st {
-                case .ok: MmBadge(text: "OK через \(app.uplink.path)", tone: .ok)
+                case .ok: MmBadge(text: L("OK через \(app.uplink.path)", "OK via \(app.uplink.path)"), tone: .ok)
                 case .fail: MmBadge(text: "FAIL", tone: .bad)
-                case .checking: MmBadge(text: "проверка…", tone: .info)
+                case .checking: MmBadge(text: L("проверка…", "checking…"), tone: .info)
                 case .unknown: MmBadge(text: "?", tone: .neutral)
                 }
                 Spacer()
-                Text(app.uplink.latencyMs.map { String(format: "%.0f мс", $0) } ?? "—")
+                Text(app.uplink.latencyMs.map { String(format: L("%.0f мс", "%.0f ms"), $0) } ?? "—")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                 Text(Fmt.ago(app.uplink.checkedAt)).font(.caption).foregroundStyle(.secondary)
@@ -36,16 +36,16 @@ struct NetworkView: View {
             Button {
                 Task { await app.checkUplink() }
             } label: {
-                Label("Проверить 204 (gstatic)", systemImage: "arrow.triangle.pull")
+                Label(L("Проверить 204 (gstatic)", "Check 204 (gstatic)"), systemImage: "arrow.triangle.pull")
             }
         }
     }
 
 
     private var ifacesCard: some View {
-        Section("Интерфейсы") {
+        Section(L("Интерфейсы", "Interfaces")) {
             if let ifs = ifaces {
-                if ifs.isEmpty { Text("Пусто").foregroundStyle(.secondary) }
+                if ifs.isEmpty { Text(L("Пусто", "Empty")).foregroundStyle(.secondary) }
                 ForEach(ifs) { f in
                     IfaceRow(iface: f) { Task { await load() } }
                 }
@@ -58,13 +58,13 @@ struct NetworkView: View {
                     await load()
                 }
             } label: {
-                Label("Перечитать сеть (network reload)", systemImage: "arrow.clockwise.circle")
+                Label(L("Перечитать сеть (network reload)", "Reload network (network reload)"), systemImage: "arrow.clockwise.circle")
             }
         }
     }
 
     private func leasesCard(_ list: [Lease]) -> some View {
-        Section("DHCP-аренды (\(list.count))") {
+        Section(L("DHCP-аренды (\(list.count))", "DHCP leases (\(list.count))")) {
             ForEach(list) { l in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -72,7 +72,7 @@ struct NetworkView: View {
                         Spacer()
                         Text(l.ip).font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
-                    Text("\(l.mac) · до \(l.expires)").font(.caption2).foregroundStyle(.secondary)
+                    Text(L("\(l.mac) · до \(l.expires)", "\(l.mac) · until \(l.expires)")).font(.caption2).foregroundStyle(.secondary)
                 }
             }
         }
@@ -131,7 +131,7 @@ struct IfaceRow: View {
                 Button {
                     showEdit = true
                 } label: {
-                    Text("править").font(.caption)
+                    Text(L("править", "edit")).font(.caption)
                 }
                 .buttonStyle(.borderless)
             }
@@ -192,10 +192,10 @@ struct IfaceEditView: View {
 
     var body: some View {
         Form {
-            Section("Живой статус") {
-                KVRow(key: "Статус", value: iface.up ? "up" : "down")
+            Section(L("Живой статус", "Live status")) {
+                KVRow(key: L("Статус", "Status"), value: iface.up ? "up" : "down")
                 KVRow(key: "IP", value: iface.ips.joined(separator: ", "))
-                KVRow(key: "Шлюз", value: iface.gateway)
+                KVRow(key: L("Шлюз", "Gateway"), value: iface.gateway)
                 KVRow(key: "DNS", value: iface.dns.joined(separator: ", "))
             }
 
@@ -213,16 +213,16 @@ struct IfaceEditView: View {
                 Button {
                     Task { await saveMetric() }
                 } label: {
-                    HStack { Spacer(); Text("Сохранить metric"); Spacer() }
+                    HStack { Spacer(); Text(L("Сохранить metric", "Save metric")); Spacer() }
                 }
                 .disabled(busy || Int(metricDraft) == nil)
             } header: {
-                Text("Metric (failover-порядок)")
+                Text(L("Metric (failover-порядок)", "Metric (failover order)"))
             } footer: {
-                Text("Чем меньше metric, тем приоритетнее интерфейс. У wwan обычно 10, у резервного канала выше.")
+                Text(L("Чем меньше metric, тем приоритетнее интерфейс. У wwan обычно 10, у резервного канала выше.", "The lower the metric, the higher the interface priority. wwan usually 10, backup channel higher."))
             }
 
-            Section("Перезапуск") {
+            Section(L("Перезапуск", "Restart")) {
                 HStack {
                     Button("ifup") { ifAction = "ifup"; confirmIf = true }
                     Button("ifdown") { ifAction = "ifdown"; confirmIf = true }
@@ -235,26 +235,26 @@ struct IfaceEditView: View {
             if cfg == nil { Task { await load() } }
             metricDraft = iface.metric.map(String.init) ?? ""
         }
-        .alert("Новая опция", isPresented: $addOption) {
-            TextField("имя (например mtu)", text: $newOptName)
+        .alert(L("Новая опция", "New option"), isPresented: $addOption) {
+            TextField(L("имя (например mtu)", "name (e.g. mtu)"), text: $newOptName)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            TextField("значение", text: $newOptValue)
-            Button("Добавить") {
+            TextField(L("значение", "value"), text: $newOptValue)
+            Button(L("Добавить", "Add")) {
                 Task { await saveOption(newOptName, newOptValue) }
                 newOptName = ""; newOptValue = ""
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
         .alert("Изменить \(editing?.name ?? "")", isPresented: Binding(
             get: { editing != nil }, set: { if !$0 { editing = nil } })) {
-            TextField("значение", text: $editValue)
+            TextField(L("значение", "value"), text: $editValue)
                 .textInputAutocapitalization(.never)
-            Button("Сохранить") {
+            Button(L("Сохранить", "Save")) {
                 if let o = editing { Task { await saveOption(o.name, editValue) } }
                 editing = nil
             }
-            Button("Отмена", role: .cancel) { editing = nil }
+            Button(L("Отмена", "Cancel"), role: .cancel) { editing = nil }
         }
         .alert("\(ifAction) \(iface.name)?", isPresented: $confirmIf) {
             Button(ifAction, role: ifAction == "ifdown" ? ButtonRole.destructive : nil) {
@@ -262,13 +262,13 @@ struct IfaceEditView: View {
                     await app.run { svc in try await svc.exec("if\(ifAction == "ifup" ? "up" : "down") \(iface.name) 2>&1; echo done") }
                 }
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
     }
 
     private func uciSectionPicker(_ config: UciConfig) -> some View {
         let interfaces = config.sections.filter { $0.type == "interface" }
-        return Section("Секция UCI не найдена по имени — выбери вручную") {
+        return Section(L("Секция UCI не найдена по имени — выбери вручную", "UCI section not found by name — pick manually")) {
             ForEach(interfaces) { section in
                 let proto = section.options.first(where: { $0.name == "proto" })?.value ?? "?"
                 Button("\(section.name) · proto \(proto)") {
@@ -284,12 +284,12 @@ struct IfaceEditView: View {
                 uciOptionRow(option)
             }
             Button { addOption = true } label: {
-                Label("Добавить опцию", systemImage: "plus")
+                Label(L("Добавить опцию", "Add option"), systemImage: "plus")
             }
         } header: {
-            Text("Опции UCI: network.\(section.anon ? section.name : sectionId)")
+            Text(L("Опции UCI: network.\(section.anon ? section.name : sectionId)", "UCI options: network.\(section.anon ? section.name : sectionId)"))
         } footer: {
-            Text("Пиры и тонкие настройки туннелей — в «Конфиг UCI → network». Каждое изменение сразу пишется в uci (commit).")
+            Text(L("Пиры и тонкие настройки туннелей — в «Конфиг UCI → network». Каждое изменение сразу пишется в uci (commit).", "Peers and fine tunnel tuning are in “UCI config → network”. Every change is written to uci immediately (commit)."))
         }
     }
 
@@ -402,7 +402,7 @@ struct RoutesView: View {
                 Text("ip -4 route")
             }
         }
-        .navigationTitle("Маршруты")
+        .navigationTitle(L("Маршруты", "Routes"))
         .refreshable { await load() }
         .onAppear { if routes == nil { Task { await load() } } }
     }
@@ -430,17 +430,17 @@ struct WifiView: View {
 
     var body: some View {
         List {
-            Section("Радио") {
+            Section(L("Радио", "Radio")) {
                 if devices.isEmpty { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(devices, id: \.self) { d in
                     HStack {
                         Image(systemName: "dot.radiowaves.right")
                         Text(d).font(.system(.subheadline, design: .monospaced))
                         Spacer()
-                        Button("скан") { showScan = true }
+                        Button(L("скан", "scan")) { showScan = true }
                             .buttonStyle(.borderless)
                             .font(.caption)
-                        Button("каналы") {
+                        Button(L("каналы", "channels")) {
                             surveyDevice = d
                             Task { await loadChannels() }
                         }
@@ -450,11 +450,11 @@ struct WifiView: View {
                 }
             }
             if !channels.isEmpty {
-                Section("Каналы \(surveyDevice) — загрузка") {
+                Section(L("Каналы \(surveyDevice) — загрузка", "Channels \(surveyDevice) — load")) {
                     ForEach(channels) { c in
                         HStack {
                             Text("ch \(c.channel)").font(.system(.subheadline, design: .monospaced))
-                            Text("\(c.freq) МГц").font(.caption).foregroundStyle(.secondary)
+                            Text(L("\(c.freq) МГц", "\(c.freq) MHz")).font(.caption).foregroundStyle(.secondary)
                             Spacer()
                             if let p = c.busyPercent {
                                 ProgressRow(label: "", value: p / 100,
@@ -468,13 +468,13 @@ struct WifiView: View {
                     }
                 }
             }
-            Section("Точки доступа") {
+            Section(L("Точки доступа", "Access points")) {
                 if aps.isEmpty { Text("—").foregroundStyle(.secondary) }
                 ForEach(aps, id: \.ssid) { ap in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(ap.ssid.isEmpty ? "(без имени)" : ap.ssid)
-                            Text("\(ap.radio) · \(ap.mode)\(ap.hidden ? " · скрытая" : "")\(ap.disabled ? " · выключена" : "")")
+                            Text(ap.ssid.isEmpty ? L("(без имени)", "(unnamed)") : ap.ssid)
+                            Text("\(ap.radio) · \(ap.mode)\(ap.hidden ? L(" · скрытая", " · hidden") : "")\(ap.disabled ? L(" · выключена", " · off") : "")")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -482,8 +482,8 @@ struct WifiView: View {
                     }
                 }
             }
-            Section("Подключённые клиенты (\(clients.count))") {
-                if clients.isEmpty { Text("Нет клиентов").foregroundStyle(.secondary) }
+            Section(L("Подключённые клиенты (\(clients.count))", "Connected clients (\(clients.count))")) {
+                if clients.isEmpty { Text(L("Нет клиентов", "No clients")).foregroundStyle(.secondary) }
                 ForEach(clients) { c in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
@@ -546,7 +546,7 @@ struct WifiScanView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Радио", selection: $device) {
+                Picker(L("Радио", "Radio"), selection: $device) {
                     ForEach(devices, id: \.self) { Text($0).tag($0) }
                 }
                 Button {
@@ -555,13 +555,13 @@ struct WifiScanView: View {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
-                        Text("Сканировать").bold()
+                        Text(L("Сканировать", "Scan")).bold()
                         Spacer()
                     }
                 }
                 .disabled(busy || device.isEmpty)
             }
-            Section("Сети (\(results.count))") {
+            Section(L("Сети (\(results.count))", "Networks (\(results.count))")) {
                 ForEach(results) { r in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
@@ -581,7 +581,7 @@ struct WifiScanView: View {
                 }
             }
         }
-        .navigationTitle("Скан окружения")
+        .navigationTitle(L("Скан окружения", "Environment scan"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if device.isEmpty { device = devices.first ?? "" } }
     }
@@ -607,7 +607,7 @@ struct VpnView: View {
     var body: some View {
         List {
             if let list = instances {
-                if list.isEmpty { Text("WireGuard/AmneziaWG не настроены").foregroundStyle(.secondary) }
+                if list.isEmpty { Text(L("WireGuard/AmneziaWG не настроены", "WireGuard/AmneziaWG not configured")).foregroundStyle(.secondary) }
                 ForEach(list) { inst in
                     Section("wg: \(inst.name) \(inst.kind == "awg" ? "(AmneziaWG)" : "")") {
                         HStack {
@@ -654,10 +654,10 @@ struct VpnView: View {
     }
 
     private func handshakeBadge(_ d: Date?) -> some View {
-        guard let d else { return AnyView(MmBadge(text: "не рукопожатался", tone: .bad)) }
+        guard let d else { return AnyView(MmBadge(text: L("не рукопожатался", "no handshake yet"), tone: .bad)) }
         let s = Date().timeIntervalSince(d)
-        if s < 180 { return AnyView(MmBadge(text: "живой · \(Int(s)) с", tone: .ok)) }
-        return AnyView(MmBadge(text: "давно · \(Fmt.ago(d))", tone: .warn))
+        if s < 180 { return AnyView(MmBadge(text: L("живой · \(Int(s)) с", "alive · \(Int(s)) s"), tone: .ok)) }
+        return AnyView(MmBadge(text: L("давно · \(Fmt.ago(d))", "long ago · \(Fmt.ago(d))"), tone: .warn))
     }
 
     private func toggle(_ inst: VpnInstance) async {

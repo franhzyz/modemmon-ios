@@ -80,9 +80,9 @@ struct MainView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        NavigationLink(value: "menuconfig") { Label("Настройка меню", systemImage: "slider.horizontal.3") }
-                        NavigationLink(value: "settings") { Label("Настройки", systemImage: "gearshape") }
-                        Menu("Сменить роутер") {
+                        NavigationLink(value: "menuconfig") { Label(L("Настройка меню", "Menu setup"), systemImage: "slider.horizontal.3") }
+                        NavigationLink(value: "settings") { Label(L("Настройки", "Settings"), systemImage: "gearshape") }
+                        Menu(L("Сменить роутер", "Switch router")) {
                             ForEach(app.profiles) { profile in
                                 Button(profile.name.isEmpty ? profile.host : profile.name) {
                                     app.disconnect()
@@ -93,7 +93,7 @@ struct MainView: View {
                         Button(role: .destructive) {
                             app.disconnect()
                         } label: {
-                            Label("Отключиться", systemImage: "stop.circle")
+                            Label(L("Отключиться", "Disconnect"), systemImage: "stop.circle")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -113,12 +113,12 @@ struct MainView: View {
     }
 
     private var headerTitle: String {
-        if app.conn == .demo { return "Демо-режим" }
-        if app.uplink.path.isEmpty { return "Подключено" }
+        if app.conn == .demo { return L("Демо-режим", "Demo mode") }
+        if app.uplink.path.isEmpty { return L("Подключено", "Connected") }
         if viaModem {
-            return app.modem?.operatorName.isEmpty == false ? app.modem!.operatorName : "Подключено (модем)"
+            return app.modem?.operatorName.isEmpty == false ? app.modem!.operatorName : L("Подключено (модем)", "Connected (modem)")
         }
-        return "Подключено (кабель)"
+        return L("Подключено (кабель)", "Connected (cable)")
     }
 
     private var headerSection: some View {
@@ -185,7 +185,7 @@ struct MainView: View {
     private var statusLine: String {
         var parts: [String] = []
         if !app.uplink.path.isEmpty {
-            parts.append(viaModem ? "модем (\(app.uplink.path))" : "кабель (\(app.uplink.path))")
+            parts.append(viaModem ? L("модем (\(app.uplink.path))", "modem (\(app.uplink.path))") : L("кабель (\(app.uplink.path))", "cable (\(app.uplink.path))"))
         }
         if viaModem, let m = app.modem {
             if !m.rat.isEmpty { parts.append(m.rat) }
@@ -200,10 +200,10 @@ struct MainView: View {
 
     private var uplinkBadge: some View {
         switch app.uplink.st {
-        case .ok: return AnyView(MmBadge(text: "интернет", tone: .ok))
-        case .fail: return AnyView(MmBadge(text: "нет интернета", tone: .bad))
-        case .checking: return AnyView(MmBadge(text: "проверка…", tone: .info))
-        case .unknown: return AnyView(MmBadge(text: "аплинк?", tone: .neutral))
+        case .ok: return AnyView(MmBadge(text: L("интернет", "internet"), tone: .ok))
+        case .fail: return AnyView(MmBadge(text: L("нет интернета", "no internet"), tone: .bad))
+        case .checking: return AnyView(MmBadge(text: L("проверка…", "checking…"), tone: .info))
+        case .unknown: return AnyView(MmBadge(text: L("аплинк?", "uplink?"), tone: .neutral))
         }
     }
 

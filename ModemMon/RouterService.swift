@@ -117,7 +117,7 @@ struct RouterService {
         }
         let text = textLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         let received = pduType == "deliver" || state == "received"
-        return Sms(id: String(id), number: number, text: text.isEmpty ? "(без текста)" : text, ts: ts, isNew: received)
+        return Sms(id: String(id), number: number, text: text.isEmpty ? L("(без текста)", "(no text)") : text, ts: ts, isNew: received)
     }
 
     private func parseMmDate(_ s: String) -> Date? {
@@ -137,15 +137,15 @@ struct RouterService {
         guard !digits.isEmpty, digits.count <= 20,
               digits.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
               !text.isEmpty, !text.contains("\0") else {
-            throw MmError.backend("Укажите корректный номер и непустой текст SMS")
+            throw MmError.backend(L("Укажите корректный номер и непустой текст SMS", "Enter a valid number and non-empty SMS text"))
         }
         do {
             let reply = try await cgi("\(profile.modemPath)?op=sms_send&number=\(cleaned.enc)&text=\(text.enc)", timeout: 30)
             if let err = reply.string("error"), !err.isEmpty, err != "0" {
-                throw MmError.backend("Отправка SMS: \(err)")
+                throw MmError.backend(L("Отправка SMS: \(err)", "Sending SMS: \(err)"))
             }
             if let ok = reply.value("success") as? Bool, !ok {
-                throw MmError.backend("Роутер отклонил отправку SMS")
+                throw MmError.backend(L("Роутер отклонил отправку SMS", "The router rejected SMS sending"))
             }
         } catch MmError.http(let code) where code == 404 {
             try await smsSendViaMm(number: cleaned, text: text)
@@ -156,7 +156,7 @@ struct RouterService {
     /// Не повторяем отправку автоматически после сбоя: результат может быть неизвестен.
     private func smsSendViaMm(number: String, text: String) async throws {
         let capabilities = try await exec("mmcli --help-messaging 2>&1")
-        guard capabilities.ok else { throw MmError.backend("ModemManager недоступен: \(capabilities.stdout.prefix(200))") }
+        guard capabilities.ok else { throw MmError.backend(L("ModemManager недоступен: \(capabilities.stdout.prefix(200))", "ModemManager unavailable: \(capabilities.stdout.prefix(200))")) }
         let options = "number='\(number)'"
         let createCommand: String
         if capabilities.stdout.contains("--messaging-create-sms-with-text") {
@@ -166,20 +166,20 @@ struct RouterService {
                 "mmcli -m any --messaging-create-sms='\(options.shellQ)' --messaging-create-sms-with-text=\"$f\" 2>&1"
         } else {
             guard !(text.contains("'") && text.contains("\"")) else {
-                throw MmError.backend("Эта версия mmcli не поддерживает текст с обоими видами кавычек. Обновите ModemManager или измените текст.")
+                throw MmError.backend(L("Эта версия mmcli не поддерживает текст с обоими видами кавычек. Обновите ModemManager или измените текст.", "This mmcli version does not support text with both quote kinds. Update ModemManager or change the text."))
             }
             let quote = text.contains("'") ? "\"" : "'"
             let arguments = "\(options),text=\(quote)\(text)\(quote)"
             createCommand = "mmcli -m any --messaging-create-sms='\(arguments.shellQ)' 2>&1"
         }
         let created = try await exec(createCommand, timeout: 60)
-        guard created.ok else { throw MmError.backend("Не удалось создать SMS: \(created.stdout.prefix(250))") }
+        guard created.ok else { throw MmError.backend(L("Не удалось создать SMS: \(created.stdout.prefix(250))", "Failed to create SMS: \(created.stdout.prefix(250))")) }
         let prefix = "/org/freedesktop/ModemManager1/SMS/"
         guard let range = created.stdout.range(of: prefix) else {
-            throw MmError.backend("ModemManager не вернул ID SMS: \(created.stdout.prefix(200))")
+            throw MmError.backend(L("ModemManager не вернул ID SMS: \(created.stdout.prefix(200))", "ModemManager did not return an SMS ID: \(created.stdout.prefix(200))"))
         }
         let id = String(created.stdout[range.upperBound...].prefix(while: { $0.isNumber }))
-        guard !id.isEmpty else { throw MmError.backend("ModemManager вернул некорректный ID SMS") }
+        guard !id.isEmpty else { throw MmError.backend(L("ModemManager вернул некорректный ID SMS", "ModemManager returned an invalid SMS ID")) }
         let sent = try await exec("mmcli -s \(id) --send 2>&1", timeout: 70)
         let sendOk = sent.ok && !sent.stdout.lowercased().contains("error")
         if !sendOk {
@@ -205,7 +205,7 @@ struct RouterService {
             chars.removeFirst(n)
         }
 
-        var lastError = "нет ответа"
+        var lastError = L("нет ответа", "no response")
         for (idx, part) in parts.enumerated() {
             let pdu = buildSmsSubmitPdu(number: number,
                                         ucs2Text: String(part),
@@ -222,7 +222,7 @@ struct RouterService {
             } else {
                 lastError = String(out.prefix(140))
             }
-            throw MmError.backend("SMS не отправлена (AT): \(lastError)")
+            throw MmError.backend(L("SMS не отправлена (AT): \(lastError)", "SMS not sent (AT): \(lastError)"))
         }
     }
 
@@ -285,9 +285,9 @@ struct RouterService {
                 let reply = j.string("reply", "text", "ussd_reply") ?? ""
                 let st = j.string("status", "ussd_status") ?? ""
                 if !reply.isEmpty { return reply }
-                if st.contains("fail") || st.contains("error") { return "Ошибка сети: \(st)" }
+                if st.contains("fail") || st.contains("error") { return L("Ошибка сети: \(st)", "Network error: \(st)") }
             }
-            return "(нет ответа за 20 с)"
+            return L("(нет ответа за 20 с)", "(no response in 20 s)")
         } catch MmError.http(let c) where c == 404 {
             let out = try await mm("-m any --3gpp-ussd-initiate='\(code.shellQ)'", timeout: 60)
             if let r = out.range(of: "reply from network:") {
@@ -296,7 +296,7 @@ struct RouterService {
                 if s.hasSuffix("'") { s = String(s.dropLast()) }
                 return s
             }
-            return out.isEmpty ? "(пустой ответ)" : out
+            return out.isEmpty ? L("(пустой ответ)", "(empty response)") : out
         }
     }
 
@@ -320,7 +320,7 @@ struct RouterService {
         var lines = out.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         if let first = lines.first, first.trimmingCharacters(in: .whitespaces) == cmd { lines.removeFirst() }
         let clean = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? "(нет ответа)" : clean
+        return clean.isEmpty ? L("(нет ответа)", "(no response)") : clean
     }
 
     private func findAtPort() async throws -> String {
@@ -329,7 +329,7 @@ struct RouterService {
             let out = (try? await execText(script)) ?? ""
             if out.contains("Manufacturer") || out.contains("OK") || out.contains("ERROR") { return p }
         }
-        throw MmError.backend("AT-порт модема не найден (проверял ttyUSB0-3)")
+        throw MmError.backend(L("AT-порт модема не найден (проверял ttyUSB0-3)", "Modem AT port not found (tried ttyUSB0-3)"))
     }
 
     // MARK: Бэнды
@@ -347,11 +347,11 @@ struct RouterService {
         }
         let result = try await exec("mmcli -m any 2>&1", timeout: 25)
         guard result.ok else {
-            throw MmError.backend("Не удалось получить бэнды: \(result.stdout.prefix(250))")
+            throw MmError.backend(L("Не удалось получить бэнды: \(result.stdout.prefix(250))", "Failed to get bands: \(result.stdout.prefix(250))"))
         }
         let info = parseMmBands(result.stdout)
         guard !info.supported.isEmpty else {
-            throw MmError.backend("Модем не вернул список поддерживаемых бэндов")
+            throw MmError.backend(L("Модем не вернул список поддерживаемых бэндов", "The modem did not return supported bands"))
         }
         return info
     }
@@ -399,21 +399,21 @@ struct RouterService {
             let csv = bands.joined(separator: ",")
             let reply = try await cgi("\(profile.modemPath)?op=bands_set&bands=\(csv.enc)", timeout: 40)
             if let error = reply.string("error"), !error.isEmpty {
-                throw MmError.backend("Бэнды: \(error)")
+                throw MmError.backend(L("Бэнды: \(error)", "Bands: \(error)"))
             }
             if let ok = reply.value("success") as? Bool, !ok {
-                throw MmError.backend("Роутер отклонил изменение бэндов")
+                throw MmError.backend(L("Роутер отклонил изменение бэндов", "The router rejected the band change"))
             }
         } catch MmError.http(let code) where code == 404 {
             let names = bands.map { bandToMm($0) }
             let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
             guard names.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy { allowedCharacters.contains($0) } }) else {
-                throw MmError.backend("Некорректное имя бэнда")
+                throw MmError.backend(L("Некорректное имя бэнда", "Invalid band name"))
             }
             let list = names.isEmpty ? "any" : names.joined(separator: "|")
             let result = try await exec("mmcli -m any --set-current-bands='\(list.shellQ)' 2>&1", timeout: 60)
             guard result.ok else {
-                throw MmError.backend("Не удалось применить бэнды: \(result.stdout.prefix(300))")
+                throw MmError.backend(L("Не удалось применить бэнды: \(result.stdout.prefix(300))", "Failed to apply bands: \(result.stdout.prefix(300))"))
             }
         }
     }
@@ -630,7 +630,7 @@ struct RouterService {
         return d.list("results").map { c in
             let ch = c.int("channel") ?? 0
             let band = ch <= 14 ? "2.4" : (ch >= 32 && ch <= 177 ? "5" : "6")
-            return ScanResult(ssid: c.string("ssid") ?? "(скрытая)",
+            return ScanResult(ssid: c.string("ssid") ?? L("(скрытая)", "(hidden)"),
                               bssid: (c.string("bssid") ?? "?").uppercased(),
                               channel: c.int("channel"),
                               band: band,
@@ -754,7 +754,7 @@ struct RouterService {
 
     func serviceAction(_ name: String, _ action: SvcAction) async throws {
         let r = try await exec("/etc/init.d/\(name.shellQ) \(action.rawValue) 2>&1; echo done")
-        if r.stdout.contains("not found") { throw MmError.backend("Сервис не найден") }
+        if r.stdout.contains("not found") { throw MmError.backend(L("Сервис не найден", "Service not found")) }
     }
 
     func processes() async throws -> [ProcInfo] {
@@ -785,7 +785,7 @@ struct RouterService {
     func createBackup() async throws -> String {
         let name = "/tmp/modemmon-backup-\(Int(Date().timeIntervalSince1970)).tar.gz"
         let r = try await exec("sysupgrade -b \(name) 2>&1; test -f \(name) && echo ok || echo fail", allowDangerous: true)
-        guard r.stdout.contains("ok") else { throw MmError.backend("sysupgrade -b не сработал: \(r.stdout) \(r.stderr)") }
+        guard r.stdout.contains("ok") else { throw MmError.backend(L("sysupgrade -b не сработал: \(r.stdout) \(r.stderr)", "sysupgrade -b failed: \(r.stdout) \(r.stderr)")) }
         return name
     }
 
@@ -883,7 +883,7 @@ struct RouterService {
         let result = try await exec(script, allowDangerous: true)
         guard result.ok else {
             let detail = (result.stderr + " " + result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw MmError.backend("Не удалось сохранить настройки UCI (код \(result.code)): \(detail.prefix(250))")
+            throw MmError.backend(L("Не удалось сохранить настройки UCI (код \(result.code)): \(detail.prefix(250))", "Failed to save UCI settings (code \(result.code)): \(detail.prefix(250))"))
         }
     }
 
@@ -925,7 +925,7 @@ struct RouterService {
 
     func wolInstall() async throws {
         let r = try await exec("apk add etherwake >/dev/null 2>&1; opkg install etherwake >/dev/null 2>&1; command -v etherwake >/dev/null && echo ok || echo fail")
-        guard r.stdout.contains("ok") else { throw MmError.backend("Не удалось установить etherwake") }
+        guard r.stdout.contains("ok") else { throw MmError.backend(L("Не удалось установить etherwake", "Failed to install etherwake")) }
     }
 
     func wolSend(mac: String, iface: String) async throws {
@@ -1113,7 +1113,7 @@ struct RouterService {
     func forkopAction(_ action: SvcAction) async throws {
         let stateAction = (action == .start || action == .restart) ? "restart" : action.rawValue
         let r = try await exec("/etc/init.d/forkop \(action.rawValue) 2>&1 && /etc/init.d/forkop-state \(stateAction) 2>&1", allowDangerous: true, timeout: 45)
-        guard r.ok else { throw MmError.backend("Команда службы Форкоп: \(r.stdout.prefix(250))") }
+        guard r.ok else { throw MmError.backend(L("Команда службы Форкоп: \(r.stdout.prefix(250))", "Forkop service command: \(r.stdout.prefix(250))")) }
     }
 
     func forkopLog() async throws -> String {
@@ -1265,11 +1265,11 @@ struct RouterService {
 
         let svc = try await execText("/etc/init.d/forkop status 2>&1")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        res.append(ForkopCheck(name: "Сервис forkop", ok: svc.contains("running"), detail: svc))
+        res.append(ForkopCheck(name: L("Сервис forkop", "forkop service"), ok: svc.contains("running"), detail: svc))
 
         let chk = try await execText("sing-box check -c /etc/sing-box/config.json 2>&1; echo EXIT=$?")
         let chkOK = chk.contains("EXIT=0") && !chk.lowercased().contains("error")
-        res.append(ForkopCheck(name: "Конфиг sing-box", ok: chkOK, detail: chkOK ? "валиден" : String(chk.prefix(220))))
+        res.append(ForkopCheck(name: L("Конфиг sing-box", "sing-box config"), ok: chkOK, detail: chkOK ? L("валиден", "valid") : String(chk.prefix(220))))
 
         var clashOK = false
         var clashV = ""
@@ -1277,25 +1277,25 @@ struct RouterService {
             clashOK = true
             clashV = j.string("version") ?? ""
         }
-        res.append(ForkopCheck(name: "Clash API (:9090)", ok: clashOK, detail: clashOK ? clashV : "недоступен"))
+        res.append(ForkopCheck(name: "Clash API (:9090)", ok: clashOK, detail: clashOK ? clashV : L("недоступен", "unavailable")))
 
         let ports = try await execText("netstat -tln 2>/dev/null | grep -E ':9090|:2080|:53 ' | awk '{print $4}'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        res.append(ForkopCheck(name: "Порты 9090 / 2080 / 53", ok: !ports.isEmpty,
-                               detail: ports.isEmpty ? "не слушаются" : ports.replacingOccurrences(of: "\n", with: " · ")))
+        res.append(ForkopCheck(name: L("Порты 9090 / 2080 / 53", "Ports 9090 / 2080 / 53"), ok: !ports.isEmpty,
+                               detail: ports.isEmpty ? L("не слушаются", "not listening") : ports.replacingOccurrences(of: "\n", with: " · ")))
 
         let dns = try await execText("nslookup google.com 127.0.0.42 2>&1 | tail -2")
         let dnsOK = dns.lowercased().contains("address")
-        res.append(ForkopCheck(name: "DNS sing-box (127.0.0.42)", ok: dnsOK, detail: dnsOK ? "отвечает" : String(dns.prefix(160))))
+        res.append(ForkopCheck(name: "DNS sing-box (127.0.0.42)", ok: dnsOK, detail: dnsOK ? L("отвечает", "responding") : String(dns.prefix(160))))
 
         let px = try await execText("curl -s -o /dev/null -w '%{http_code} %{time_total}' -x http://127.0.0.1:2080 --max-time 8 https://www.gstatic.com/generate_204 2>&1")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        res.append(ForkopCheck(name: "Прокси-цепочка (:2080 → gstatic)", ok: px.hasPrefix("204"),
-                               detail: px.hasPrefix("204") ? "204 OK — цепочка работает" : "не прошёл: \(px)"))
+        res.append(ForkopCheck(name: L("Прокси-цепочка (:2080 → gstatic)", "Proxy chain (:2080 → gstatic)"), ok: px.hasPrefix("204"),
+                               detail: px.hasPrefix("204") ? L("204 OK — цепочка работает", "204 OK — the chain works") : L("не прошёл: \(px)", "failed: \(px)")))
 
         let errs = try await execText("logread | grep -iE 'forkop|sing-box' | grep -iE 'error|fail' | tail -3")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        res.append(ForkopCheck(name: "Свежие ошибки в логе", ok: errs.isEmpty, detail: errs.isEmpty ? "нет" : errs))
+        res.append(ForkopCheck(name: L("Свежие ошибки в логе", "Fresh errors in the log"), ok: errs.isEmpty, detail: errs.isEmpty ? L("нет", "none") : errs))
 
         return res
     }

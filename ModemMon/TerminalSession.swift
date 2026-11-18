@@ -30,7 +30,7 @@ final class TerminalSession: ObservableObject {
         do {
             try await Install.installMmterm(svc.ubus)
             installed = true
-            lines.append(TermLine(text: "mmterm установлен на роутер", isCmd: false))
+            lines.append(TermLine(text: L("mmterm установлен на роутер", "mmterm installed on the router"), isCmd: false))
         } catch {
             installed = false
             app.banner = "mmterm: \(error.localizedDescription)"
@@ -45,7 +45,7 @@ final class TerminalSession: ObservableObject {
 
         if app.conn == .demo {
             lines.append(TermLine(text: "$ " + command, isCmd: true))
-            lines.append(TermLine(text: "(демо-режим: команда не выполняется)", isCmd: false))
+            lines.append(TermLine(text: L("(демо-режим: команда не выполняется)", "(demo mode: the command is not executed)"), isCmd: false))
             return
         }
 
@@ -113,7 +113,7 @@ final class TerminalSession: ObservableObject {
         busy = false
         guard let app, let svc = app.service, app.conn != .demo else { return }
         _ = try? await svc.ubus.fileExec("/usr/bin/mmterm stop")
-        lines.append(TermLine(text: "— прервано —", isCmd: false))
+        lines.append(TermLine(text: L("— прервано —", "— interrupted —"), isCmd: false))
     }
 
     func clear() { lines = [] }

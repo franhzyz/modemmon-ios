@@ -26,10 +26,10 @@ struct OverviewView: View {
                 trafficCard(m)
                 devicesCard
             } else {
-                Section { ProgressView("Ждём данные…").frame(maxWidth: .infinity) }
+                Section { ProgressView(L("Ждём данные…", "Waiting for data…")).frame(maxWidth: .infinity) }
             }
         }
-        .navigationTitle("Обзор модема")
+        .navigationTitle(L("Обзор модема", "Modem overview"))
         .refreshable { await app.checkUplink(); await loadChannels() }
         .onAppear {
             if modemDevices.isEmpty && app.conn != .demo { Task { await loadDevices() } }
@@ -44,16 +44,16 @@ struct OverviewView: View {
     /// Какой канал держит маршрут по умолчанию (основной/резерв).
     /// Переключение: uci-метрики (90/110) + reload; демон medvemodem следует.
     private var modemSwitchCard: some View {
-        Section("Переключение модемов") {
+        Section(L("Переключение модемов", "Modem switching")) {
             if !channelsLoaded && switchingDev == nil {
-                Text("Загрузка…").foregroundStyle(.secondary)
+                Text(L("Загрузка…", "Loading…")).foregroundStyle(.secondary)
             }
             ForEach(Array(channels.enumerated()), id: \.offset) { idx, ch in
                 HStack {
                     Text(Self.devLabel(ch.1))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(idx == 0 ? "основной" : "резерв")
+                    Text(idx == 0 ? L("основной", "primary") : L("резерв", "backup"))
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -64,7 +64,7 @@ struct OverviewView: View {
                         Button {
                             Task { await switchChannel(ch.1) }
                         } label: {
-                            Text("Сделать основным")
+                            Text(L("Сделать основным", "Make primary"))
                                 .font(.caption.weight(.semibold))
                         }
                         .buttonStyle(.borderless)
@@ -75,15 +75,15 @@ struct OverviewView: View {
             if let sw = switchingDev {
                 HStack {
                     ProgressView().padding(.trailing, 6)
-                    Text("Переключаю на \(Self.devLabel(sw))… (~20-40 с)")
+                    Text(L("Переключаю на \(Self.devLabel(sw))… (~20-40 с)", "Switching to \(Self.devLabel(sw))… (~20-40 s)"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
             if let e = channelsError {
                 Text(e).font(.caption).foregroundStyle(.red)
             }
-            Text("Переключение меняет приоритет каналов (метрики). Автопереключение " +
-                 "при пропадании интернета продолжает работать; модем при смене перезванивает.")
+            Text(L("Переключение меняет приоритет каналов (метрики). Автопереключение ", "Switching changes channel priority (metrics). Auto-failover ") +
+                 L("при пропадании интернета продолжает работать; модем при смене перезванивает.", "keeps working when internet drops; the modem redials on switch."))
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
@@ -138,14 +138,14 @@ struct OverviewView: View {
                 return
             }
         }
-        channelsError = "Переключение затянулось — проверь статус каналов"
+        channelsError = L("Переключение затянулось — проверь статус каналов", "Switching is taking too long — check channel status")
         switchingDev = nil
     }
 
     private static func devLabel(_ dev: String) -> String {
-        if dev.hasPrefix("wwan") || dev.hasPrefix("qmi") { return "Модем LTE (\(dev))" }
-        if dev.hasPrefix("usb") { return "USB-модем (\(dev))" }
-        if dev.hasPrefix("pppoe") || dev.contains("wan") || dev.hasPrefix("eth") { return "Кабель (\(dev))" }
+        if dev.hasPrefix("wwan") || dev.hasPrefix("qmi") { return L("Модем LTE (\(dev))", "LTE modem (\(dev))") }
+        if dev.hasPrefix("usb") { return L("USB-модем (\(dev))", "USB modem (\(dev))") }
+        if dev.hasPrefix("pppoe") || dev.contains("wan") || dev.hasPrefix("eth") { return L("Кабель (\(dev))", "Cable (\(dev))") }
         return dev
     }
 
@@ -154,7 +154,7 @@ struct OverviewView: View {
     }
 
     private var devicesCard: some View {
-        Section("Устройства медвемодема") {
+        Section(L("Устройства медвемодема", "MedveModem devices")) {
             if modemDevices.isEmpty {
                 Text("—").font(.caption).foregroundStyle(.secondary)
             }
@@ -170,14 +170,14 @@ struct OverviewView: View {
     }
 
     private func antennasCard(_ m: ModemSnapshot) -> some View {
-        Section("Антенны") {
+        Section(L("Антенны", "Antennas")) {
             if m.antennas.isEmpty {
                 Text("—").foregroundStyle(.secondary)
             }
             ForEach(m.antennas) { a in
                 HStack {
-                    Text("Антенна \(a.chain + 1)").font(.subheadline)
-                    if !a.tuned { MmBadge(text: "не настроена", tone: .warn) }
+                    Text(L("Антенна \(a.chain + 1)", "Antenna \(a.chain + 1)")).font(.subheadline)
+                    if !a.tuned { MmBadge(text: L("не настроена", "not configured"), tone: .warn) }
                     Spacer()
                     Text(a.rsrp.map { String(format: "%.1f dBm", $0) } ?? "—")
                         .font(.caption.monospacedDigit())
@@ -192,20 +192,20 @@ struct OverviewView: View {
 
     private func bearerCard(_ m: ModemSnapshot) -> some View {
         let bi = m.bearerIface ?? ""
-        return Section("Bearer (подключение к сети)") {
+        return Section(L("Bearer (подключение к сети)", "Bearer (network connection)")) {
             KVRow(key: "APN", value: m.bearerApn.isEmpty ? "—" : m.bearerApn)
             KVRow(key: "IPv4", value: m.bearerIPv4.isEmpty ? "—" : m.bearerIPv4)
             KVRow(key: "MTU", value: m.bearerMtu.map(String.init) ?? "—")
-            KVRow(key: "Интерфейс", value: bi.isEmpty ? "—" : bi)
+            KVRow(key: L("Интерфейс", "Interface"), value: bi.isEmpty ? "—" : bi)
         }
     }
 
     private func trafficCard(_ m: ModemSnapshot) -> some View {
-        Section("Трафик сессии") {
+        Section(L("Трафик сессии", "Session traffic")) {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatTile(title: "Всего ↓", value: Fmt.bytes(m.trafficDl))
-                StatTile(title: "Всего ↑", value: Fmt.bytes(m.trafficUl))
-                StatTile(title: "Сессия", value: m.connectTimeSec.map(Fmt.uptime) ?? "—")
+                StatTile(title: L("Всего ↓", "Total ↓"), value: Fmt.bytes(m.trafficDl))
+                StatTile(title: L("Всего ↑", "Total ↑"), value: Fmt.bytes(m.trafficUl))
+                StatTile(title: L("Сессия", "Session"), value: m.connectTimeSec.map(Fmt.uptime) ?? "—")
             }
         }
     }
@@ -238,19 +238,19 @@ struct OverviewView: View {
             switch app.uplink.st {
             case .ok:
                 Image(systemName: "checkmark.icloud").foregroundStyle(.green)
-                Text("Интернет через \(app.uplink.path) · \(app.uplink.latencyMs.map { String(format: "%.0f мс", $0) } ?? "—")")
+                Text(L("Интернет через", "Internet via") + " \(app.uplink.path) · \(app.uplink.latencyMs.map { String(format: L("%.0f мс", "%.0f ms"), $0) } ?? "—")")
             case .fail:
                 Image(systemName: "icloud.slash").foregroundStyle(.red)
-                Text("Интернета нет").foregroundStyle(.red)
+                Text(L("Интернета нет", "No internet")).foregroundStyle(.red)
             case .checking:
                 ProgressView().controlSize(.small)
-                Text("Проверяем аплинк…")
+                Text(L("Проверяем аплинк…", "Checking uplink…"))
             case .unknown:
                 Image(systemName: "questionmark.icloud").foregroundStyle(.secondary)
-                Text("Аплинк не проверен")
+                Text(L("Аплинк не проверен", "Uplink not checked"))
             }
             Spacer()
-            Button("Проверить") { Task { await app.checkUplink() } }
+            Button(L("Проверить", "Check")) { Task { await app.checkUplink() } }
                 .buttonStyle(.borderless)
                 .font(.subheadline)
         }
@@ -258,7 +258,7 @@ struct OverviewView: View {
     }
 
     private func signalCard(_ m: ModemSnapshot) -> some View {
-        Section("Сигнал") {
+        Section(L("Сигнал", "Signal")) {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 if m.lteRsrp != nil || m.nrRsrp == nil {
                     StatTile(title: "LTE RSRP", value: Fmt.dbm(m.lteRsrp), tone: rsrpColor(m.lteRsrp))
@@ -276,7 +276,7 @@ struct OverviewView: View {
             }
             if app.trends.count > 1 {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("RSRP, последние \(app.trends.count) замеров")
+                    Text(L("RSRP, последние \(app.trends.count) замеров", "RSRP, last \(app.trends.count) samples"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Chart(app.trends, id: \.t) { p in
@@ -296,7 +296,7 @@ struct OverviewView: View {
 
     private func qualityCard(_ m: ModemSnapshot) -> some View {
         Section {
-            ProgressRow(label: "Качество сигнала",
+            ProgressRow(label: L("Качество сигнала", "Signal quality"),
                         value: (m.qualityPercent ?? 0) / 100,
                         caption: m.qualityPercent.map { String(format: "%.0f%%", $0) },
                         color: rsrpColor(m.bestRsrp))
@@ -304,50 +304,50 @@ struct OverviewView: View {
     }
 
     private func sysCard(_ s: SysOverview) -> some View {
-        Section("Роутер") {
+        Section(L("Роутер", "Router")) {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatTile(title: "Загрузка (1 мин)", value: String(format: "%.2f", s.load1), sub: String(format: "%.2f / %.2f", s.load5, s.load15))
-                StatTile(title: "Память", value: Fmt.bytes((s.memTotalKb - s.memFreeKb) * 1024), sub: "всего \(Fmt.bytes(s.memTotalKb * 1024))")
+                StatTile(title: L("Загрузка (1 мин)", "Load (1 min)"), value: String(format: "%.2f", s.load1), sub: String(format: "%.2f / %.2f", s.load5, s.load15))
+                StatTile(title: L("Память", "Memory"), value: Fmt.bytes((s.memTotalKb - s.memFreeKb) * 1024), sub: L("всего \(Fmt.bytes(s.memTotalKb * 1024))", "total \(Fmt.bytes(s.memTotalKb * 1024))"))
                 StatTile(title: "Uptime", value: Fmt.uptime(s.uptime))
-                StatTile(title: "CPU", value: Fmt.temp(s.cpuTemp), sub: "\(s.cores.count) ядер")
+                StatTile(title: "CPU", value: Fmt.temp(s.cpuTemp), sub: L("\(s.cores.count) ядер", "\(s.cores.count) cores"))
             }
-            KVRow(key: "Модель", value: s.model)
-            KVRow(key: "Прошивка", value: s.firmware)
-            KVRow(key: "Ядро", value: s.kernel)
+            KVRow(key: L("Модель", "Model"), value: s.model)
+            KVRow(key: L("Прошивка", "Firmware"), value: s.firmware)
+            KVRow(key: L("Ядро", "Kernel"), value: s.kernel)
         }
     }
 
     private func cellCard(_ m: ModemSnapshot) -> some View {
-        Section("Сота") {
+        Section(L("Сота", "Cell")) {
             KVRow(key: "Cell ID", value: m.cellId.map { String($0) } ?? "—")
             KVRow(key: "EARFCN", value: m.earfcn.map { String($0) } ?? "—")
             KVRow(key: "PCI", value: m.pci.map { String($0) } ?? "—")
-            KVRow(key: "Бэнд", value: m.band)
-            NavigationLink("Соты вокруг →", value: "cells")
+            KVRow(key: L("Бэнд", "Band"), value: m.band)
+            NavigationLink(L("Соты вокруг →", "Cells around →"), value: "cells")
                 .font(.subheadline)
         }
     }
 
     private func tempCard(_ m: ModemSnapshot) -> some View {
-        Section("Температуры") {
+        Section(L("Температуры", "Temperatures")) {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatTile(title: "Модем", value: Fmt.temp(m.tempModem), tone: m.tempModem.map { $0 > 65 ? Color.red : ($0 > 55 ? .orange : .green) } ?? .primary)
+                StatTile(title: L("Модем", "Modem"), value: Fmt.temp(m.tempModem), tone: m.tempModem.map { $0 > 65 ? Color.red : ($0 > 55 ? .orange : .green) } ?? .primary)
                 StatTile(title: "PA", value: Fmt.temp(m.tempPa))
             }
             if !m.tempSource.isEmpty {
-                KVRow(key: "Источник", value: m.tempSource)
+                KVRow(key: L("Источник", "Source"), value: m.tempSource)
             }
         }
     }
 
     private func simCard(_ m: ModemSnapshot) -> some View {
-        Section("SIM / модем") {
-            KVRow(key: "Оператор", value: "\(m.operatorName) (\(m.operatorCode))")
+        Section(L("SIM / модем", "SIM / modem")) {
+            KVRow(key: L("Оператор", "Operator"), value: "\(m.operatorName) (\(m.operatorCode))")
             KVRow(key: "IMSI", value: m.sim.imsi)
             KVRow(key: "ICCID", value: m.sim.iccid)
             KVRow(key: "IMEI", value: m.sim.imei)
-            KVRow(key: "Модель", value: m.modelName)
-            KVRow(key: "Прошивка", value: m.fwVersion)
+            KVRow(key: L("Модель", "Model"), value: m.modelName)
+            KVRow(key: L("Прошивка", "Firmware"), value: m.fwVersion)
         }
     }
 }
@@ -360,18 +360,18 @@ struct CellsView: View {
     var body: some View {
         List {
             if let m = app.modem {
-                Section("Текущая сота") {
+                Section(L("Текущая сота", "Current cell")) {
                     KVRow(key: "RAT", value: m.rat)
                     KVRow(key: "Cell ID", value: m.cellId.map { String($0) } ?? "—")
                     KVRow(key: "EARFCN", value: m.earfcn.map { String($0) } ?? "—")
                     KVRow(key: "PCI", value: m.pci.map { String($0) } ?? "—")
-                    KVRow(key: "Бэнд", value: m.band)
+                    KVRow(key: L("Бэнд", "Band"), value: m.band)
                     KVRow(key: "RSRP", value: Fmt.dbm(m.bestRsrp), valueTone: rsrpColor(m.bestRsrp))
                     KVRow(key: "SINR", value: m.bestSinr.map { String(format: "%.1f dB", $0) } ?? "—", valueTone: sinrColor(m.bestSinr))
                 }
-                Section("Соседние соты (\(m.neighbors.count))") {
+                Section(L("Соседние соты (\(m.neighbors.count))", "Neighbor cells (\(m.neighbors.count))")) {
                     if m.neighbors.isEmpty {
-                        Text("Нет данных от medvemodem").foregroundStyle(.secondary)
+                        Text(L("Нет данных от medvemodem", "No data from medvemodem")).foregroundStyle(.secondary)
                     }
                     ForEach(m.neighbors) { c in
                         HStack(spacing: 10) {
@@ -397,7 +397,7 @@ struct CellsView: View {
                 Section { ProgressView().frame(maxWidth: .infinity) }
             }
         }
-        .navigationTitle("Соты")
+        .navigationTitle(L("Соты", "Cells"))
     }
 }
 
@@ -414,7 +414,7 @@ struct BandsView: View {
 
     var body: some View {
         List {
-            Section("Сейчас разрешены") {
+            Section(L("Сейчас разрешены", "Currently allowed")) {
                 Text(allowed.isEmpty ? "—" : allowed.joined(separator: ", "))
                     .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -423,9 +423,9 @@ struct BandsView: View {
                 if loading {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if supported.isEmpty {
-                    Text("Список бэндов недоступен. Проверьте соединение и повторите попытку.")
+                    Text(L("Список бэндов недоступен. Проверьте соединение и повторите попытку.", "Band list unavailable. Check the connection and try again."))
                         .foregroundStyle(.secondary)
-                    Button("Повторить") { Task { await load() } }
+                    Button(L("Повторить", "Retry")) { Task { await load() } }
                 } else {
                     ForEach(supported, id: \.self) { b in
                         Button {
@@ -445,9 +445,9 @@ struct BandsView: View {
                     }
                 }
             } header: {
-                Text("Лок бэндов (выберите разрешённые)")
+                Text(L("Лок бэндов (выберите разрешённые)", "Band lock (choose allowed)"))
             } footer: {
-                Text("Пустой выбор = автоматический выбор бэндов. Применение может временно прервать связь.")
+                Text(L("Пустой выбор = автоматический выбор бэндов. Применение может временно прервать связь.", "Empty selection = automatic band selection. Applying may briefly drop the connection."))
             }
             Section {
                 Button {
@@ -456,17 +456,17 @@ struct BandsView: View {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
-                        Text("Применить (\(selected.count))").bold()
+                        Text(L("Применить (\(selected.count))", "Apply (\(selected.count))")).bold()
                         Spacer()
                     }
                 }
                 .disabled(busy || loading || supported.isEmpty)
-                Button("Сбросить ограничения (авто)") { selected.removeAll() }
+                Button(L("Сбросить ограничения (авто)", "Reset restrictions (auto)")) { selected.removeAll() }
                     .foregroundStyle(.secondary)
                     .disabled(busy || loading || supported.isEmpty)
             }
         }
-        .navigationTitle("Бэнды")
+        .navigationTitle(L("Бэнды", "Bands"))
         .onAppear {
             if !loaded {
                 loaded = true
@@ -493,8 +493,8 @@ struct BandsView: View {
     }
 
     private func apply() async {
-        guard app.conn != .demo else { app.banner = "В демо-режиме бэнды не применяются"; return }
-        guard let service = app.service else { app.banner = "Нет подключения к роутеру"; return }
+        guard app.conn != .demo else { app.banner = L("В демо-режиме бэнды не применяются", "Bands are not applied in demo mode"); return }
+        guard let service = app.service else { app.banner = L("Нет подключения к роутеру", "Not connected to the router"); return }
         busy = true
         defer { busy = false }
         do {
@@ -504,10 +504,10 @@ struct BandsView: View {
                 supported = info.supported
                 selected = Set(info.allowed.filter { info.supported.contains($0) })
             } else {
-                app.banner = "Команда отправлена, но проверить результат не удалось. Обновите список."
+                app.banner = L("Команда отправлена, но проверить результат не удалось. Обновите список.", "The command was sent but the result could not be checked. Refresh the list.")
             }
         } catch {
-            app.banner = "Бэнды: \(error.localizedDescription)"
+            app.banner = L("Бэнды: \(error.localizedDescription)", "Bands: \(error.localizedDescription)")
         }
     }
 }
@@ -543,20 +543,20 @@ struct SmsTab: View {
                 Button {
                     showSend = true
                 } label: {
-                    Label("Написать SMS", systemImage: "square.and.pencil")
+                    Label(L("Написать SMS", "Compose SMS"), systemImage: "square.and.pencil")
                 }
             }
-            Section("Входящие (\(sms.count))") {
+            Section(L("Входящие (\(sms.count))", "Inbox (\(sms.count))")) {
                 if loading && sms.isEmpty {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if sms.isEmpty {
-                    Text("Пусто").foregroundStyle(.secondary)
+                    Text(L("Пусто", "Empty")).foregroundStyle(.secondary)
                 }
                 ForEach(sms) { m in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(m.number).font(.subheadline.weight(.semibold))
-                            if m.isNew { MmBadge(text: "новое", tone: .info) }
+                            if m.isNew { MmBadge(text: L("новое", "new"), tone: .info) }
                             Spacer()
                             Text(Fmt.time(m.ts)).font(.caption).foregroundStyle(.secondary)
                         }
@@ -568,21 +568,21 @@ struct SmsTab: View {
                                 await app.run { svc in try await svc.smsDelete(id: m.id) }
                                 sms.removeAll { $0.id == m.id }
                             }
-                        } label: { Label("Удалить", systemImage: "trash") }
+                        } label: { Label(L("Удалить", "Delete"), systemImage: "trash") }
                     }
                 }
             }
         }
         .refreshable { await load() }
         .onAppear { if sms.isEmpty { Task { await load() } } }
-        .alert("Новое SMS", isPresented: $showSend) {
-            TextField("Номер", text: $newNumber)
+        .alert(L("Новое SMS", "New SMS"), isPresented: $showSend) {
+            TextField(L("Номер", "Number"), text: $newNumber)
                 .keyboardType(.phonePad)
-            TextField("Текст", text: $newText)
-            Button("Отправить") { Task { await send() } }
-            Button("Отмена", role: .cancel) { }
+            TextField(L("Текст", "Text"), text: $newText)
+            Button(L("Отправить", "Send")) { Task { await send() } }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         } message: {
-            Text("SMS уйдёт через модем роутера")
+            Text(L("SMS уйдёт через модем роутера", "SMS goes via the router modem"))
         }
     }
 
@@ -599,7 +599,7 @@ struct SmsTab: View {
 
     private func send() async {
         let num = newNumber, txt = newText
-        guard app.conn != .demo else { app.banner = "В демо-режиме SMS не отправляются"; return }
+        guard app.conn != .demo else { app.banner = L("В демо-режиме SMS не отправляются", "SMS is not sent in demo mode"); return }
         guard let _: Void = await app.run({ svc in try await svc.smsSend(number: num, text: txt) }) else { return }
         newNumber = ""; newText = ""
         await load()
@@ -615,8 +615,8 @@ struct UssdTab: View {
 
     var body: some View {
         Form {
-            Section("Запрос") {
-                TextField("USSD-код", text: $code)
+            Section(L("Запрос", "Request")) {
+                TextField(L("USSD-код", "USSD code"), text: $code)
                     .keyboardType(.numbersAndPunctuation)
                     .font(.system(.body, design: .monospaced))
                 Button {
@@ -625,19 +625,19 @@ struct UssdTab: View {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
-                        Text("Отправить").bold()
+                        Text(L("Отправить", "Send")).bold()
                         Spacer()
                     }
                 }
                 .disabled(busy)
             }
             if !status.isEmpty {
-                Section("Статус") {
+                Section(L("Статус", "Status")) {
                     Text(status).foregroundStyle(.secondary)
                 }
             }
             if !reply.isEmpty {
-                Section("Ответ") {
+                Section(L("Ответ", "Response")) {
                     Text(reply)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
@@ -649,21 +649,21 @@ struct UssdTab: View {
     private func start() async {
         busy = true
         reply = ""
-        status = "отправляем…"
+        status = L("отправляем…", "sending…")
         if app.conn == .demo {
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            status = "готово"
-            reply = "На счету 312.45 руб. Демо."
+            status = L("готово", "done")
+            reply = L("На счету 312.45 руб. Демо.", "Balance 312.45 RUB. Demo.")
             busy = false
             return
         }
         let r = await app.run { svc in try await svc.ussdRun(code: code) }
         busy = false
         if let r {
-            status = "готово"
+            status = L("готово", "done")
             reply = r
         } else {
-            status = "ошибка — см. баннер"
+            status = L("ошибка — см. баннер", "error — see the banner")
         }
     }
 }
@@ -692,7 +692,7 @@ struct AtTab: View {
             .foregroundStyle(.green)
             Divider()
             HStack(spacing: 8) {
-                TextField("AT-команда", text: $cmd)
+                TextField(L("AT-команда", "AT command"), text: $cmd)
                     .font(.system(.body, design: .monospaced))
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -708,7 +708,7 @@ struct AtTab: View {
             }
             .padding(10)
         }
-        .navigationTitle("AT-консоль")
+        .navigationTitle(L("AT-консоль", "AT console"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -718,13 +718,13 @@ struct AtTab: View {
         out.append("→ \(c)")
         busy = true
         if app.conn == .demo {
-            out.append(c == "AT+CSQ" ? "+CSQ: 21,99" : "OK (демо)")
+            out.append(c == "AT+CSQ" ? "+CSQ: 21,99" : L("OK (демо)", "OK (demo)"))
             busy = false
             return
         }
         let r = await app.run { svc in try await svc.sendAt(c) }
         busy = false
-        out.append(r ?? "(ошибка — см. баннер)")
+        out.append(r ?? L("(ошибка — см. баннер)", "(error — see the banner)"))
         if out.count > 300 { out.removeFirst(out.count - 300) }
     }
 }

@@ -45,11 +45,11 @@ struct ForkopView: View {
                 urltestCard(c)
                 settingsCard(c)
             } else {
-                Section { ProgressView("Читаем конфиг forkop…").frame(maxWidth: .infinity) }
+                Section { ProgressView(L("Читаем конфиг forkop…", "Reading forkop config…")).frame(maxWidth: .infinity) }
             }
             logSection
         }
-        .navigationTitle("Форкоп")
+        .navigationTitle(L("Форкоп", "Forkop"))
         .refreshable { await loadAll() }
         .onAppear {
             Task { await loadAll() }
@@ -61,7 +61,7 @@ struct ForkopView: View {
     // MARK: Статус
 
     private var statusSection: some View {
-        Section("Статус") {
+        Section(L("Статус", "Status")) {
             if let s = status {
                 HStack {
                     MmBadge(text: s.service.isEmpty ? "?" : s.service,
@@ -78,14 +78,14 @@ struct ForkopView: View {
                     Text(v).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 if !s.ports.isEmpty {
-                    Text("Порты: " + s.ports.joined(separator: " · "))
+                    Text(L("Порты: ", "Ports: ") + s.ports.joined(separator: " · "))
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    smallAction("Рестарт", .restart)
-                    smallAction("Старт", .start)
-                    smallAction("Стоп", .stop)
+                    smallAction(L("Рестарт", "Restart"), .restart)
+                    smallAction(L("Старт", "Start"), .start)
+                    smallAction(L("Стоп", "Stop"), .stop)
                 }
             } else {
                 ProgressView().frame(maxWidth: .infinity)
@@ -96,19 +96,19 @@ struct ForkopView: View {
     // MARK: Дашборд
 
     private var dashSection: some View {
-        Section("Дашборд") {
+        Section(L("Дашборд", "Dashboard")) {
             if let d = status, d.clashAlive {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatTile(title: "Скорость ↓", value: Fmt.kbps(dash.downBps))
-                    StatTile(title: "Скорость ↑", value: Fmt.kbps(dash.upBps))
-                    StatTile(title: "Соединения", value: "\(dash.active)")
-                    StatTile(title: "Всего ↓", value: Fmt.bytes(dash.downTotal))
-                    StatTile(title: "Всего ↑", value: Fmt.bytes(dash.upTotal))
-                    StatTile(title: "Нагрузка", value: dash.cpu.map { String(format: "%.0f%%", $0) } ?? "—",
-                             sub: dash.memMB.map { String(format: "%.1f МБ", $0) })
+                    StatTile(title: L("Скорость ↓", "Speed ↓"), value: Fmt.kbps(dash.downBps))
+                    StatTile(title: L("Скорость ↑", "Speed ↑"), value: Fmt.kbps(dash.upBps))
+                    StatTile(title: L("Соединения", "Connections"), value: "\(dash.active)")
+                    StatTile(title: L("Всего ↓", "Total ↓"), value: Fmt.bytes(dash.downTotal))
+                    StatTile(title: L("Всего ↑", "Total ↑"), value: Fmt.bytes(dash.upTotal))
+                    StatTile(title: L("Нагрузка", "Load"), value: dash.cpu.map { String(format: "%.0f%%", $0) } ?? "—",
+                             sub: dash.memMB.map { String(format: L("%.1f МБ", "%.1f MB"), $0) })
                 }
                 if let up = dash.coreUp {
-                    Text("Ядро работает: \(Fmt.uptime(up))")
+                    Text(L("Ядро работает: \(Fmt.uptime(up))", "Core running: \(Fmt.uptime(up))"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -118,7 +118,7 @@ struct ForkopView: View {
                     } label: {
                         HStack {
                             if testing { ProgressView().controlSize(.small) }
-                            Text("Тест всех секций").font(.caption.weight(.semibold))
+                            Text(L("Тест всех секций", "Test all sections")).font(.caption.weight(.semibold))
                         }
                     }
                     .buttonStyle(.bordered)
@@ -128,7 +128,7 @@ struct ForkopView: View {
                     } label: {
                         HStack {
                             if updating { ProgressView().controlSize(.small) }
-                            Text("Обновить списки").font(.caption.weight(.semibold))
+                            Text(L("Обновить списки", "Refresh lists")).font(.caption.weight(.semibold))
                         }
                     }
                     .buttonStyle(.bordered)
@@ -145,15 +145,15 @@ struct ForkopView: View {
                             } else if let st {
                                 Text(st)
                                     .font(.caption.monospacedDigit())
-                                    .foregroundStyle(st.hasPrefix("ok") ? Color.green : (st == "тестирую…" ? .secondary : .orange))
+                                    .foregroundStyle(st.hasPrefix("ok") ? Color.green : (st == L("тестирую…", "testing…") ? .secondary : .orange))
                             } else if let ms = nodeDelays[g.now] {
-                                Text("\(ms)мс").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                Text(L("\(ms)мс", "\(ms)ms")).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
             } else {
-                Text("Дашборд появится, когда sing-box запущен (Clash API :9090)")
+                Text(L("Дашборд появится, когда sing-box запущен (Clash API :9090)", "The dashboard appears when sing-box is running (Clash API :9090)"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -164,19 +164,19 @@ struct ForkopView: View {
         testing = true
         defer { testing = false }
         for g in groups {
-            groupTestStatus[g.name] = "тестирую…"
+            groupTestStatus[g.name] = L("тестирую…", "testing…")
             if let d = await app.run({ svc in try await svc.clashTestGroup(g.name) }) {
                 for (k, v) in d { nodeDelays[k] = v }
                 let mine = d.filter { g.all.contains($0.key) }
                 if let best = mine.values.min(), best > 0 {
-                    groupTestStatus[g.name] = "ok · \(best)мс (из \(mine.count))"
+                    groupTestStatus[g.name] = L("ok · \(best)мс (из \(mine.count))", "ok · \(best)ms (of \(mine.count))")
                 } else if let d2 = nodeDelays[g.now] {
-                    groupTestStatus[g.name] = "ok · \(d2)мс"
+                    groupTestStatus[g.name] = L("ok · \(d2)мс", "ok · \(d2)ms")
                 } else {
-                    groupTestStatus[g.name] = "нет ответа"
+                    groupTestStatus[g.name] = L("нет ответа", "no response")
                 }
             } else {
-                groupTestStatus[g.name] = "ошибка"
+                groupTestStatus[g.name] = L("ошибка", "error")
             }
         }
         if let nd = await app.run({ svc in try await svc.clashNodeDelays() }) {
@@ -203,7 +203,7 @@ struct ForkopView: View {
                 HStack {
                     Spacer()
                     if diagBusy { ProgressView().padding(.trailing, 8) }
-                    Label("Диагностика", systemImage: "stethoscope")
+                    Label(L("Диагностика", "Diagnostics"), systemImage: "stethoscope")
                     Spacer()
                 }
             }
@@ -226,7 +226,7 @@ struct ForkopView: View {
                     }
                 }
             } else {
-                Text("Проверит сервис, конфиг sing-box, Clash API, порты, DNS, прокси-цепочку и свежие ошибки")
+                Text(L("Проверит сервис, конфиг sing-box, Clash API, порты, DNS, прокси-цепочку и свежие ошибки", "Checks the service, sing-box config, Clash API, ports, DNS, proxy chain and fresh errors"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -256,15 +256,15 @@ struct ForkopView: View {
     // MARK: Живой трафик (Clash API)
 
     private var trafficSection: some View {
-        Section("Трафик (live)") {
+        Section(L("Трафик (live)", "Traffic (live)")) {
             if let t = traffic {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatTile(title: "Активные", value: "\(t.active)")
-                    StatTile(title: "Скачано", value: Fmt.bytes(t.downTotal))
-                    StatTile(title: "Отдано", value: Fmt.bytes(t.upTotal))
+                    StatTile(title: L("Активные", "Active"), value: "\(t.active)")
+                    StatTile(title: L("Скачано", "Downloaded"), value: Fmt.bytes(t.downTotal))
+                    StatTile(title: L("Отдано", "Uploaded"), value: Fmt.bytes(t.upTotal))
                 }
             } else {
-                Text("Clash API недоступен (sing-box выключен или секрет установлен)")
+                Text(L("Clash API недоступен (sing-box выключен или секрет установлен)", "Clash API unavailable (sing-box off or a secret is set)"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -274,7 +274,7 @@ struct ForkopView: View {
     // MARK: Группы и узлы
 
     private var groupsSection: some View {
-        Section("Группы прокси") {
+        Section(L("Группы прокси", "Proxy groups")) {
             ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -295,7 +295,7 @@ struct ForkopView: View {
                                         HStack(spacing: 4) {
                                             Text(node).font(.caption.monospaced())
                                             if let ms = nodeDelays[node] {
-                                                Text("\(ms)мс").font(.caption2).foregroundStyle(.secondary)
+                                                Text(L("\(ms)мс", "\(ms)ms")).font(.caption2).foregroundStyle(.secondary)
                                             }
                                         }
                                         .padding(.horizontal, 8)
@@ -318,7 +318,7 @@ struct ForkopView: View {
 
     private func sectionsCard(_ c: UciConfig) -> some View {
         let secs = c.sections.filter { $0.type == "section" }
-        return Section("Правила (секции)") {
+        return Section(L("Правила (секции)", "Rules (sections)")) {
             ForEach(secs) { s in
                 NavigationLink {
                     ForkopSectionEditor(section: s, links: c.sections.filter {
@@ -344,20 +344,20 @@ struct ForkopView: View {
             Button {
                 Task { await addSection() }
             } label: {
-                Label("Добавить секцию", systemImage: "plus")
+                Label(L("Добавить секцию", "Add section"), systemImage: "plus")
             }
         }
     }
 
     private func addSection() async {
-        await app.run { svc in try await svc.forkopAddSection(label: "Новая секция", lists: []) }
+        await app.run { svc in try await svc.forkopAddSection(label: L("Новая секция", "New section"), lists: []) }
         await loadAll()
     }
 
     // MARK: Серверы
 
     private func serversCard(_ c: UciConfig) -> some View {
-        Section("Серверы и клиенты") {
+        Section(L("Серверы и клиенты", "Servers and clients")) {
             ForEach(c.sections.filter { $0.type == "server" }) { s in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -388,13 +388,13 @@ struct ForkopView: View {
     // MARK: Подписки
 
     private func subscriptionsCard(_ c: UciConfig) -> some View {
-        Section("Подписки") {
+        Section(L("Подписки", "Subscriptions")) {
             ForEach(c.sections.filter { $0.type == "subscription_url" }) { s in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(s.option("tag") ?? s.name).font(.subheadline.weight(.semibold))
                         Spacer()
-                        MmBadge(text: (s.option("subscription_update_enabled") ?? "0") == "1" ? "авто" : "вручную", tone: .info)
+                        MmBadge(text: (s.option("subscription_update_enabled") ?? "0") == "1" ? L("авто", "auto") : L("вручную", "manual"), tone: .info)
                     }
                     Text(maskUrl(s.option("url") ?? ""))
                         .font(.caption2.monospaced())
@@ -427,7 +427,7 @@ struct ForkopView: View {
 
     private func settingsCard(_ c: UciConfig) -> some View {
         let s = c.sections.first { $0.type == "settings" }
-        return Section("Настройки forkop") {
+        return Section(L("Настройки forkop", "Forkop settings")) {
             if let s {
                 ForEach(s.options) { o in
                     UciOptionEditor(config: "forkop", section: s.name, option: o) {
@@ -435,7 +435,7 @@ struct ForkopView: View {
                     }
                 }
             } else {
-                Text("Секция settings не найдена").foregroundStyle(.secondary)
+                Text(L("Секция settings не найдена", "Section settings not found")).foregroundStyle(.secondary)
             }
         }
     }
@@ -443,7 +443,7 @@ struct ForkopView: View {
     // MARK: Лог
 
     private var logSection: some View {
-        Section("Лог (forkop / sing-box)") {
+        Section(L("Лог (forkop / sing-box)", "Log (forkop / sing-box)")) {
             Text(log.isEmpty ? "—" : log)
                 .font(.system(.caption2, design: .monospaced))
                 .textSelection(.enabled)
@@ -575,10 +575,10 @@ struct ForkopSectionEditor: View {
 
     var body: some View {
         Form {
-            Section("Основное") {
-                TextField("Название", text: $label)
-                Toggle("Включена", isOn: $enabled)
-                LabeledContent("Тип", value: section.option("action") ?? "connection")
+            Section(L("Основное", "Main")) {
+                TextField(L("Название", "Name"), text: $label)
+                Toggle(L("Включена", "Enabled"), isOn: $enabled)
+                LabeledContent(L("Тип", "Type"), value: section.option("action") ?? "connection")
             }
 
             Section {
@@ -595,32 +595,32 @@ struct ForkopSectionEditor: View {
                     }
                 }
                 HStack {
-                    TextField("свой список…", text: $customList)
+                    TextField(L("свой список…", "own list…"), text: $customList)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Button("Добавить") {
+                    Button(L("Добавить", "Add")) {
                         let v = customList.trimmingCharacters(in: .whitespaces)
                         if !v.isEmpty { lists.insert(v); customList = "" }
                     }
                     .disabled(customList.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: {
-                Text("Списки (community_lists): \(lists.count)")
+                Text(L("Списки (community_lists): \(lists.count)", "Lists (community_lists): \(lists.count)"))
             } footer: {
-                Text("Отмеченные списки будут применены. Галочку можно снять — список уйдёт из секции.")
+                Text(L("Отмеченные списки будут применены. Галочку можно снять — список уйдёт из секции.", "Checked lists will be applied. Untick a checkbox and the list leaves the section."))
             }
 
-            Section("Ссылки-подключения (\(links.count))") {
+            Section(L("Ссылки-подключения (\(links.count))", "Connection links (\(links.count))")) {
                 ForEach(links) { l in
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField("имя", text: linkNameBinding(l))
+                        TextField(L("имя", "name"), text: linkNameBinding(l))
                             .font(.subheadline.weight(.medium))
                         TextField("vless://…", text: linkUriBinding(l))
                             .font(.caption.monospaced())
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         HStack {
-                            Button("Сохранить") {
+                            Button(L("Сохранить", "Save")) {
                                 Task {
                                     await saveLink(l)
                                 }
@@ -635,7 +635,7 @@ struct ForkopSectionEditor: View {
                                     dismiss()
                                 }
                             } label: {
-                                Label("Удалить ссылку", systemImage: "trash")
+                                Label(L("Удалить ссылку", "Delete link"), systemImage: "trash")
                             }
                             .buttonStyle(.borderless)
                             .font(.caption)
@@ -646,7 +646,7 @@ struct ForkopSectionEditor: View {
                 Button {
                     showAddLink = true
                 } label: {
-                    Label("Добавить ссылку", systemImage: "plus")
+                    Label(L("Добавить ссылку", "Add link"), systemImage: "plus")
                 }
             }
 
@@ -657,7 +657,7 @@ struct ForkopSectionEditor: View {
                     HStack {
                         Spacer()
                         if busy { ProgressView().padding(.trailing, 8) }
-                        Text("Сохранить и применить").bold()
+                        Text(L("Сохранить и применить", "Save and apply")).bold()
                         Spacer()
                     }
                 }
@@ -665,10 +665,10 @@ struct ForkopSectionEditor: View {
                 Button(role: .destructive) {
                     confirmDelete = true
                 } label: {
-                    HStack { Spacer(); Text("Удалить секцию"); Spacer() }
+                    HStack { Spacer(); Text(L("Удалить секцию", "Delete section")); Spacer() }
                 }
             } footer: {
-                Text("«Сохранить и применить» записывает конфиг и перезапускает forkop — правила подхватятся автоматически.")
+                Text(L("«Сохранить и применить» записывает конфиг и перезапускает forkop — правила подхватятся автоматически.", "“Save and apply” writes the config and restarts forkop — rules are picked up automatically."))
             }
         }
         .navigationTitle(section.option("label") ?? section.name)
@@ -680,28 +680,28 @@ struct ForkopSectionEditor: View {
             lists = Set(raw.split(separator: " ").map(String.init).filter { !$0.isEmpty })
         }
         .alert("Удалить секцию \(section.option("label") ?? section.name)?", isPresented: $confirmDelete) {
-            Button("Удалить", role: .destructive) {
+            Button(L("Удалить", "Delete"), role: .destructive) {
                 Task {
                     guard let _: Void = await app.run({ svc in try await svc.forkopDeleteSection(id: section.name) }) else { return }
                     reload()
                     dismiss()
                 }
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         }
-        .alert("Новая ссылка-подключение", isPresented: $showAddLink) {
-            TextField("Имя", text: $newLinkName)
+        .alert(L("Новая ссылка-подключение", "New connection link"), isPresented: $showAddLink) {
+            TextField(L("Имя", "Name"), text: $newLinkName)
             TextField("vless://…", text: $newLinkUri)
-            Button("Добавить") {
+            Button(L("Добавить", "Add")) {
                 Task {
                     guard let _: Void = await app.run({ svc in try await svc.forkopAddLink(section: section.name, name: newLinkName, uri: newLinkUri) }) else { return }
                     newLinkName = ""; newLinkUri = ""
                     reload()
                 }
             }
-            Button("Отмена", role: .cancel) { }
+            Button(L("Отмена", "Cancel"), role: .cancel) { }
         } message: {
-            Text("URI целиком: vless://…#имя")
+            Text(L("URI целиком: vless://…#имя", "Full URI: vless://…#name"))
         }
     }
 
@@ -729,8 +729,8 @@ struct ForkopSectionEditor: View {
         }) else { return }
         // Ошибка рестарта не означает, что запись не состоялась.
         guard let _: Void = await app.run({ svc in try await svc.forkopAction(.restart) }) else {
-            let detail = app.banner ?? "Проверьте службу и лог."
-            app.banner = "Настройки сохранены, но перезапустить Форкоп не удалось: \(detail)"
+            let detail = app.banner ?? L("Проверьте службу и лог.", "Check the service and the log.")
+            app.banner = L("Настройки сохранены, но перезапустить Форкоп не удалось: \(detail)", "Settings saved, but Forkop restart failed: \(detail)")
             return
         }
         reload()

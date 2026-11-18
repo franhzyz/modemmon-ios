@@ -232,16 +232,16 @@ enum Fmt {
 
     static func kbps(_ k: Double?) -> String {
         guard let k, k.isFinite, k >= 0 else { return "—" }
-        if k >= 1_000_000 { return String(format: "%.1f Гбит/с", k / 1_000_000) }
-        if k >= 1000 { return String(format: "%.1f Мбит/с", k / 1000) }
-        return String(format: "%.0f кбит/с", k)
+        if k >= 1_000_000 { return String(format: L("%.1f Гбит/с", "%.1f Gbit/s"), k / 1_000_000) }
+        if k >= 1000 { return String(format: L("%.1f Мбит/с", "%.1f Mbit/s"), k / 1000) }
+        return String(format: L("%.0f кбит/с", "%.0f kbit/s"), k)
     }
 
     static func uptime(_ s: Int) -> String {
         let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60
-        if d > 0 { return "\(d) д \(h) ч" }
-        if h > 0 { return "\(h) ч \(m) мин" }
-        return "\(m) мин"
+        if d > 0 { return L("\(d) д \(h) ч", "\(d)d \(h)h") }
+        if h > 0 { return L("\(h) ч \(m) мин", "\(h)h \(m)min") }
+        return L("\(m) мин", "\(m)min")
     }
 
     static func dbm(_ v: Double?) -> String {
@@ -269,8 +269,8 @@ enum Fmt {
     static func ago(_ d: Date?) -> String {
         guard let d else { return "—" }
         let s = Int(Date().timeIntervalSince(d))
-        if s < 60 { return "\(max(0, s)) с назад" }
-        if s < 3600 { return "\(s / 60) мин назад" }
-        return "\(s / 3600) ч назад"
+        if s < 60 { return L("\(max(0, s)) с назад", "\(max(0, s)) s ago") }
+        if s < 3600 { return L("\(s / 60) мин назад", "\(s / 60) min ago") }
+        return L("\(s / 3600) ч назад", "\(s / 3600) h ago")
     }
 }
