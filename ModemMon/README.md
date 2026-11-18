@@ -1,5 +1,7 @@
 # ModemMon iOS
 
+**Русский** | [English](README.en.md)
+
 iOS-приложение (SwiftUI) для управления OpenWrt-роутером с LTE-модемом —
 порт Android-версии [ModemMon](https://github.com/franhzyz/modemmon-android).
 
