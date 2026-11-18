@@ -745,6 +745,12 @@ struct SettingsView: View {
     }
 
     private var langBinding: Binding<String> {
+        Binding(get: { L10n.lang }, set: { v in
+            L10n.lang = v
+        })
+    }
+
+    private var intervalBinding: Binding<Double> {
         Binding(get: { app.settings.pollInterval }, set: { v in
             app.settings.pollInterval = v
             app.startPolling()
