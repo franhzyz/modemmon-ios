@@ -38,6 +38,8 @@ struct OverviewView: View {
     }
 
     @State private var modemDevices: [RouterService.ModemDevice] = []
+    @State private var netClients: [(String, String, String?, String?)] = [] // mac, ip, host, iface
+    @State private var netClientsBusy = false
 
     // MARK: - Переключение между модемами
 
@@ -151,6 +153,79 @@ struct OverviewView: View {
 
     private func loadDevices() async {
         modemDevices = await app.run { svc in try await svc.modemDevices() } ?? []
+    }
+
+    // MARK: - Клиенты в сети (DHCP + ARP + Wi-Fi)
+
+    private var clientsSection: some View {
+        Section {
+            Button {
+                Task { await loadNetClients() }
+            } label: {
+                HStack {
+                    if netClientsBusy { ProgressView().padding(.trailing, 6) }
+                    Label(L("Обновить", "Refresh"), systemImage: "arrow.clockwise.circle")
+                }
+            }
+            if netClients.isEmpty && !netClientsBusy {
+                Text(L("Клиентов нет", "No clients")).foregroundStyle(.secondary)
+            }
+            ForEach(Array(netClients.enumerated()), id: \.offset) { _, c in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(c.2 ?? c.1).font(.subheadline.weight(.medium))
+                        Spacer()
+                        Text(c.3 ?? "").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    }
+                    Text(c.1).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Text(c.0).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text(L("Клиенты в сети", "Network clients"))
+        } footer: {
+            Text(L("DHCP-аренды + ARP-таблица + Wi-Fi-ассоциации, склеены по MAC.", "DHCP leases + ARP table + Wi-Fi associations, merged by MAC."))
+        }
+    }
+
+    private func loadNetClients() async {
+        netClientsBusy = true
+        defer { netClientsBusy = false }
+        if app.conn == .demo {
+            netClients = [("AA:BB:CC:DD:EE:01", "192.168.2.50", "demo-pc", "phy0-ap0")]
+            return
+        }
+        let script = "echo \"[leases]\"; cat /tmp/dhcp.leases 2>/dev/null | awk '{print $2\" \"$3\" \"$4}'; echo \"[arp]\"; ip neigh show 2>/dev/null | awk '$0 ~ /lladdr/ {ip=$1; dev=$3; mac=\"\"; for(i=1;i<=NF;i++) if($i==\"lladdr\") mac=$(i+1); print mac\" \"$1\" \"$3; exit 0'; echo \"[wifi]\"; for d in $(iwinfo 2>/dev/null | awk '/ESSID/{print $1}'); do iwinfo \"$d\" assoclist 2>/dev/null | awk -v d=\"$d\" '/^[0-9A-Fa-f][0-9A-Fa-f]:/{print $1\" \"d}'; done; exit 0"
+        let out = await app.run({ svc in try? await svc.execText(script) }) ?? ""
+        var lease: [String: (String, String)] = [:]
+        var arp: [String: (Set<String>, String)] = [:]
+        var wifi: [String: String] = [:]
+        var sec = ""
+        for line in out.split(separator: "\n") {
+            let l = line.trimmingCharacters(in: .whitespaces)
+            if l == "[leases]" { sec = "leases"; continue }
+            if l == "[arp]" { sec = "arp"; continue }
+            if l == "[wifi]" { sec = "wifi"; continue }
+            let p = l.split(separator: " ").map(String.init)
+            guard p.count >= 2 else { continue }
+            let mac = p[0].uppercased()
+            if sec == "leases" { lease[mac] = (p[1], p.count > 2 ? p[2] : "") }
+            if sec == "arp" {
+                let old = arp[mac] ?? ([], "")
+                var ips = old.0; ips.insert(p[1])
+                arp[mac] = (ips, p.count > 2 ? p[2] : "")
+            }
+            if sec == "wifi" { wifi[mac] = p.count > 1 ? p[1] : "" }
+        }
+        var rows: [(String, String, String?, String?)] = []
+        for m in Array(Set(lease.keys).union(arp.keys).union(wifi.keys)).sorted() {
+            var ips = Array(arp[m]?.0 ?? [])
+            if let li = lease[m]?.0, !li.isEmpty { ips.append(li) }
+            let host = lease[m]?.1.isEmpty == false ? lease[m]!.1 : nil
+            let iface = wifi[m]?.isEmpty == false ? wifi[m] : (arp[m]?.1.isEmpty == false ? arp[m]!.1 : nil)
+            rows.append((m, ips.filter { !$0.isEmpty }.joined(separator: ", "), host, iface))
+        }
+        netClients = rows.sorted { ($0.2 ?? $0.1) < ($1.2 ?? $1.1) }
     }
 
     private var devicesCard: some View {
