@@ -196,7 +196,7 @@ struct OverviewView: View {
             return
         }
         let script = "echo \"[leases]\"; cat /tmp/dhcp.leases 2>/dev/null | awk '{print $2\" \"$3\" \"$4}'; echo \"[arp]\"; ip neigh show 2>/dev/null | awk '$0 ~ /lladdr/ {ip=$1; dev=$3; mac=\"\"; for(i=1;i<=NF;i++) if($i==\"lladdr\") mac=$(i+1); print mac\" \"$1\" \"$3; exit 0'; echo \"[wifi]\"; for d in $(iwinfo 2>/dev/null | awk '/ESSID/{print $1}'); do iwinfo \"$d\" assoclist 2>/dev/null | awk -v d=\"$d\" '/^[0-9A-Fa-f][0-9A-Fa-f]:/{print $1\" \"d}'; done; exit 0"
-        let out = await app.run({ svc in try? await svc.execText(script) }) ?? ""
+        let out = (await app.run({ svc in (try? await svc.execText(script)) ?? "" }) ?? "")
         var lease: [String: (String, String)] = [:]
         var arp: [String: (Set<String>, String)] = [:]
         var wifi: [String: String] = [:]

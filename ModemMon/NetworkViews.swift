@@ -345,7 +345,7 @@ struct IfaceEditView: View {
 
     private func deleteOption(_ name: String) async {
         guard let secId else { return }
-        await app.run { svc in
+        _ = await app.run { svc in
             try await svc.exec("uci delete network.\(secId.shellQ).\(name.shellQ) 2>/dev/null; uci commit network; echo done", allowDangerous: true)
         }
         await reload()
