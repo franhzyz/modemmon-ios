@@ -245,7 +245,15 @@ struct ModemSnapshot {
         modelName = dev?.string("model") ?? ""
         fwVersion = dev?.string("firmware") ?? ""
 
-        signalHistory = telemetry.sub("signal_history")?.list("points").compactMap { $0.num("lte_rsrp") ?? $0.num("rsrp") } ?? []
+        let sigPoints = telemetry.sub("signal_history")?.list("points") ?? []
+        signalHistory = sigPoints.compactMap { $0.num("lte_rsrp") ?? $0.num("rsrp") }
+        // RNDIS-модемы: ModemManager слеп, текущий сигнал — последняя точка истории движка
+        if lteRsrp == nil, let last = sigPoints.last {
+            lteRsrp = last.num("lte_rsrp") ?? last.num("rsrp")
+            if lteSinr == nil { lteSinr = last.num("lte_sinr") ?? last.num("sinr") }
+            if lteRsrq == nil { lteRsrq = last.num("lte_rsrq") ?? last.num("rsrq") }
+            if rat.isEmpty { rat = last.string("tech") ?? "" }
+        }
         neighbors = telemetry.list("neighbors").map { c in
             NeighborCell(rat: c.string("tech") ?? c.string("rat") ?? "",
                          earfcn: c.int("earfcn") ?? c.int("arfcn"),
