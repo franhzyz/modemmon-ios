@@ -109,7 +109,7 @@ struct MainView: View {
     /// Пока маршрут неизвестен — нейтральное «Подключено».
     private var viaModem: Bool {
         let p = app.uplink.path.lowercased()
-        return p.hasPrefix("wwan") || p.hasPrefix("usb") || p.contains("qmi") || p.contains("modem")
+        return app.uplinkIsUsbModem || p.hasPrefix("wwan") || p.hasPrefix("usb") || p.contains("qmi") || p.contains("modem")
     }
 
     private var headerTitle: String {

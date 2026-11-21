@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     @Published var ifaceRates: [String: Double] = [:]      // iface → rx+tx kbit/s
     @Published var trends: [HistoryPoint] = []
     @Published var uplink = UplinkState()
+    @Published var uplinkIsUsbModem = false
     @Published var aclOk: Bool?
 
     // MARK: - Внутреннее
@@ -38,6 +39,7 @@ final class AppState: ObservableObject {
     private(set) var activeProfile: RouterProfile?
     private var pollTask: Task<Void, Never>?
     private var prevNetDev: [String: (rx: Int64, tx: Int64, t: Date)] = [:]
+    private var lastUsbCheck = Date.distantPast
     private var failCount = 0
     private var sessionPassword: String?
 
@@ -249,6 +251,15 @@ final class AppState: ObservableObject {
                                  path: uplink.path.isEmpty ? "?" : uplink.path,
                                  checkedAt: Date(),
                                  detail: L("по факту трафика", "by actual traffic"))
+        }
+        // Аплинк-интерфейс — USB-модем (RNDIS, напр. FM350-GL как eth1)?
+        // MedveModem знает происхождение устройства: device_id начинается с usb-port.
+        if Date().timeIntervalSince(lastUsbCheck) > 30 {
+            lastUsbCheck = Date()
+            if let raw = try? await svc.execText("ubus call medvemodem uplink") {
+                let carrying = raw.contains("\"device\": \"\(uplink.path)\"")
+                uplinkIsUsbModem = carrying && raw.contains("\"device_id\": \"usb-port")
+            }
         }
         appendTrend()
         if uplink.st == .unknown || (uplink.checkedAt.map { Date().timeIntervalSince($0) > 30 } ?? true) {
